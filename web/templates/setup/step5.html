@@ -41,6 +41,7 @@
                 </div>
             </div>
 
+            {% if media_server != 'jellyfin' %}
             <!-- Watchlist Settings -->
             <div style="background: var(--surface-secondary); padding: 1rem; border-radius: var(--plex-radius-sm);">
                 <h3 style="margin: 0 0 1rem 0; font-size: 1rem; display: flex; align-items: center; gap: 0.5rem;">
@@ -83,6 +84,7 @@
                     <p class="help-text">Auto-expire watchlist items after this many days (0 = never expire)</p>
                 </div>
             </div>
+            {% endif %}
 
             <!-- Retention Settings -->
             <div style="background: var(--surface-secondary); padding: 1rem; border-radius: var(--plex-radius-sm);">

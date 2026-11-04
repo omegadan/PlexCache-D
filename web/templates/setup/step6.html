@@ -67,11 +67,18 @@
             You can skip this and configure it later in Settings.
         </p>
 
+        {% if error %}
+        <div class="alert alert-error">
+            <i data-lucide="alert-circle"></i>
+            <span>{{ error }}</span>
+        </div>
+        {% endif %}
+
         <!-- Auth toggle -->
         <div class="security-toggle-row">
             <div>
                 <strong style="color: var(--plex-text);">Require Login</strong>
-                <div class="help-text" style="margin-top: 2px;">Only the Plex server owner can sign in to access the Web UI</div>
+                <div class="help-text" style="margin-top: 2px;">{% if password_required %}Sign in with a username and password to access the Web UI{% else %}Only the Plex server owner can sign in to access the Web UI{% endif %}</div>
             </div>
             <label class="toggle-switch">
                 <input type="checkbox" id="auth_enabled" name="auth_enabled" value="on"
@@ -85,7 +92,8 @@
         <div id="auth-details" style="{% if not auth_enabled %}display: none;{% endif %}">
 
             <!-- Admin identity -->
-            {% if admin_username %}
+            {% if password_required %}
+            {% elif admin_username %}
             <div class="admin-identity-box">
                 <i data-lucide="user-check"></i>
                 <div>
@@ -122,19 +130,23 @@
                     <div>
                         <strong style="color: var(--plex-text); font-size: 0.95rem;">
                             <i data-lucide="key" style="width: 16px; height: 16px; vertical-align: middle; color: var(--plex-orange);"></i>
-                            Password Fallback
+                            {% if password_required %}Password Login{% else %}Password Fallback{% endif %}
                         </strong>
-                        <div class="help-text" style="margin-top: 2px;">Optional password login when Plex OAuth is unavailable</div>
+                        <div class="help-text" style="margin-top: 2px;">{% if password_required %}Required: Plex sign-in is not available with Jellyfin{% else %}Optional password login when Plex OAuth is unavailable{% endif %}</div>
                     </div>
+                    {% if password_required %}
+                    <input type="hidden" id="auth_password_enabled" name="auth_password_enabled" value="on">
+                    {% else %}
                     <label class="toggle-switch">
                         <input type="checkbox" id="auth_password_enabled" name="auth_password_enabled" value="on"
                                {% if auth_password_enabled %}checked{% endif %}
                                onchange="togglePasswordSectionSetup()">
                         <span class="toggle-slider"></span>
                     </label>
+                    {% endif %}
                 </div>
 
-                <div id="password-section" style="{% if not auth_password_enabled %}display: none;{% endif %} margin-top: 1rem;">
+                <div id="password-section" style="{% if not auth_password_enabled and not password_required %}display: none;{% endif %} margin-top: 1rem;">
                     <div class="password-fields">
                         <div class="form-group" style="margin-bottom: 0;">
                             <label for="auth_password_username">Username</label>

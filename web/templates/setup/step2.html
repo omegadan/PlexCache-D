@@ -1,14 +1,105 @@
 {% extends "setup/base_setup.html" %}
 
+{% block head %}
+<style>
+    .server-choice {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+    }
+    .server-choice label {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+        padding: 0.85rem 1rem;
+        border: 1px solid var(--plex-border);
+        border-radius: var(--plex-radius-sm);
+        background: var(--surface-secondary);
+        cursor: pointer;
+        font-weight: 600;
+    }
+    .server-choice input { position: absolute; opacity: 0; pointer-events: none; }
+    .server-choice input:checked + label {
+        border-color: var(--plex-orange);
+        box-shadow: 0 0 0 1px var(--plex-orange);
+    }
+    .server-choice input:focus-visible + label { outline: 2px solid var(--plex-orange); outline-offset: 2px; }
+</style>
+{% endblock %}
+
 {% block content %}
-<form id="plex-form" action="/setup/step2" method="post">
+{% set is_jellyfin = media_server == 'jellyfin' %}
+<div class="setup-content" style="padding-bottom: 0;">
+    <h2>Connect Your Media Server</h2>
+    <p class="description">Choose the server PlexCache-D should read OnDeck and users from.</p>
+    <div class="server-choice" role="radiogroup" aria-label="Media server">
+        <input type="radio" name="server_choice" id="choice-plex" value="plex" {% if not is_jellyfin %}checked{% endif %} onchange="chooseServer('plex')">
+        <label for="choice-plex"><i data-lucide="server"></i> Plex</label>
+        <input type="radio" name="server_choice" id="choice-jellyfin" value="jellyfin" {% if is_jellyfin %}checked{% endif %} onchange="chooseServer('jellyfin')">
+        <label for="choice-jellyfin"><i data-lucide="tv"></i> Jellyfin</label>
+    </div>
+</div>
+
+<form id="jellyfin-form" action="/setup/step2/jellyfin" method="post" style="{% if not is_jellyfin %}display: none;{% endif %}">
     <div class="setup-content">
-        <h2>Connect to Plex</h2>
+        <p class="description">
+            Enter your Jellyfin server address and an API key. Create a key in Jellyfin under
+            <strong>Dashboard → API Keys</strong>.
+        </p>
+
+        {% if error and is_jellyfin %}
+        <div class="alert alert-error">
+            <i data-lucide="alert-circle"></i>
+            <span>{{ error }}</span>
+        </div>
+        {% endif %}
+
+        <div id="jellyfin-status"></div>
+
+        <div class="form-group">
+            <label for="jellyfin_url">Jellyfin Server URL</label>
+            <input type="text" id="jellyfin_url" name="jellyfin_url"
+                   value="{{ jellyfin_url or '' }}"
+                   placeholder="http://192.168.1.x:8096" required>
+            <p class="help-text">The URL of your Jellyfin server (include port)</p>
+        </div>
+
+        <div class="form-group">
+            <label for="jellyfin_api_key">API Key</label>
+            <input type="password" id="jellyfin_api_key" name="jellyfin_api_key"
+                   value="{{ jellyfin_api_key or '' }}"
+                   placeholder="Your Jellyfin API key" required>
+            <p class="help-text">One administrator key reads every user's Continue Watching and Next Up.</p>
+        </div>
+
+        <button type="button" class="btn btn-secondary" style="width: 100%;" onclick="testJellyfin()">
+            <i data-lucide="wifi"></i>
+            Test Connection
+        </button>
+    </div>
+
+    <div class="setup-footer">
+        <a href="/setup?step=1" class="btn btn-secondary">
+            <i data-lucide="arrow-left"></i>
+            Back
+        </a>
+        <button type="submit" class="btn btn-primary" id="jellyfin-next-btn">
+            <span class="btn-text">Next</span>
+            <i data-lucide="arrow-right" class="btn-icon"></i>
+            <div class="spinner btn-spinner" style="display: none;"></div>
+        </button>
+    </div>
+</form>
+
+<form id="plex-form" action="/setup/step2" method="post" style="{% if is_jellyfin %}display: none;{% endif %}">
+    <div class="setup-content">
         <p class="description">
             Enter your Plex server details or sign in with your Plex account.
         </p>
 
-        {% if error %}
+        {% if error and not is_jellyfin %}
         <div class="alert alert-error">
             <i data-lucide="alert-circle"></i>
             <span>{{ error }}</span>
@@ -68,6 +159,64 @@
 
 {% block scripts %}
 <script>
+    function chooseServer(server) {
+        document.getElementById('plex-form').style.display = server === 'plex' ? '' : 'none';
+        document.getElementById('jellyfin-form').style.display = server === 'jellyfin' ? '' : 'none';
+    }
+
+    function setJellyfinStatus(kind, message, spinner) {
+        const statusDiv = document.getElementById('jellyfin-status');
+        statusDiv.innerHTML = '';
+        const alert = document.createElement('div');
+        alert.className = 'alert alert-' + kind;
+        if (spinner) {
+            const sp = document.createElement('div');
+            sp.className = 'spinner';
+            alert.appendChild(sp);
+        } else {
+            const icon = document.createElement('i');
+            icon.setAttribute('data-lucide', kind === 'success' ? 'check-circle' : 'alert-circle');
+            alert.appendChild(icon);
+        }
+        const text = document.createElement('span');
+        text.textContent = message;  // server text never parsed as HTML
+        alert.appendChild(text);
+        statusDiv.appendChild(alert);
+        lucide.createIcons();
+    }
+
+    async function testJellyfin() {
+        const url = document.getElementById('jellyfin_url').value.trim();
+        const key = document.getElementById('jellyfin_api_key').value.trim();
+        if (!url || !key) {
+            setJellyfinStatus('error', 'Please enter both URL and API key');
+            return;
+        }
+        setJellyfinStatus('info', 'Testing connection...', true);
+        try {
+            const formData = new FormData();
+            formData.append('jellyfin_url', url);
+            formData.append('jellyfin_api_key', key);
+            const response = await fetch('/setup/test-jellyfin', { method: 'POST', body: formData });
+            const data = await response.json();
+            if (data.success) {
+                setJellyfinStatus('success', `Connected to "${data.server_name}"` + (data.version ? ` (v${data.version})` : ''));
+            } else {
+                setJellyfinStatus('error', 'Connection failed: ' + data.error);
+            }
+        } catch (error) {
+            setJellyfinStatus('error', 'Connection failed: ' + error.message);
+        }
+    }
+
+    document.getElementById('jellyfin-form').addEventListener('submit', function() {
+        const nextBtn = document.getElementById('jellyfin-next-btn');
+        nextBtn.querySelector('.btn-text').textContent = 'Connecting...';
+        nextBtn.querySelector('.btn-icon').style.display = 'none';
+        nextBtn.querySelector('.btn-spinner').style.display = 'block';
+        nextBtn.disabled = true;
+    });
+
     let oauthPollInterval = null;
     let oauthPopup = null;
     let oauthPopupCheckTimer = null;

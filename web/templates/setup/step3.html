@@ -11,14 +11,14 @@
         {% if not libraries %}
         <div class="alert alert-error">
             <i data-lucide="alert-circle"></i>
-            <span>Could not fetch libraries from Plex. Please check your connection.</span>
+            <span>Could not fetch libraries from {{ server_label | default('Plex') }}. Please check your connection.</span>
         </div>
         {% else %}
 
         <div class="form-group">
             <label>Select Libraries to Cache</label>
             <p class="help-text" style="margin-bottom: 0.75rem;">
-                Choose which libraries to monitor for OnDeck and Watchlist items.
+                {% if media_server == 'jellyfin' %}Choose which libraries to monitor for Continue Watching and Next Up. Leave all unticked to monitor every library.{% else %}Choose which libraries to monitor for OnDeck and Watchlist items.{% endif %}
             </p>
 
             <!-- Cacheable explanation -->
@@ -76,7 +76,7 @@
         <div class="form-group">
             <label>Path Mappings <span style="font-weight: normal; color: var(--plex-text-muted);">(Advanced)</span></label>
             <p class="help-text" style="margin-bottom: 0.75rem;">
-                Only needed if Plex paths differ from your actual filesystem paths (e.g., Docker path remapping).
+                Only needed if {{ server_label | default('Plex') }} paths differ from your actual filesystem paths (e.g., Docker path remapping).
                 Most users can skip this section.
             </p>
 
@@ -109,7 +109,7 @@
                                        style="flex: 1;" placeholder="e.g., Movies">
                             </div>
                             <div style="display: flex; gap: 0.5rem; align-items: center;">
-                                <strong style="width: 110px; font-size: 0.85rem; color: var(--text-secondary);">Plex Path:</strong>
+                                <strong style="width: 110px; font-size: 0.85rem; color: var(--text-secondary);">{{ server_label | default('Plex') }} Path:</strong>
                                 <input type="text" name="mapping_plex_path_{{ loop.index0 }}" value="{{ mapping.plex_path }}"
                                        style="flex: 1;" placeholder="/data/movies/">
                             </div>
@@ -209,7 +209,7 @@
                                style="flex: 1;" placeholder="e.g., Movies">
                     </div>
                     <div style="display: flex; gap: 0.5rem; align-items: center;">
-                        <strong style="width: 110px; font-size: 0.85rem; color: var(--text-secondary);">Plex Path:</strong>
+                        <strong style="width: 110px; font-size: 0.85rem; color: var(--text-secondary);">{{ server_label | default('Plex') }} Path:</strong>
                         <input type="text" name="mapping_plex_path_${mappingCount}" value=""
                                style="flex: 1;" placeholder="/data/movies/">
                     </div>

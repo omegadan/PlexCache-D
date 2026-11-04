@@ -1,0 +1,138 @@
+{% extends "setup/base_setup.html" %}
+
+{% block content %}
+<form action="/setup/step4" method="post">
+    <div class="setup-content">
+        <h2>User Configuration</h2>
+        <p class="description">
+            Choose whose Continue Watching and Next Up PlexCache-D should cache.
+        </p>
+
+        {% if not users %}
+        <div class="alert alert-error">
+            <i data-lucide="alert-circle"></i>
+            <span>Could not fetch users from Jellyfin. Go back and check the connection.</span>
+        </div>
+        {% else %}
+
+        <div class="form-group">
+            <label for="jellyfin_user">Main User</label>
+            <select id="jellyfin_user" name="jellyfin_user" onchange="syncMainUser()">
+                {% for user in users %}
+                <option value="{{ user.title }}" {% if user.title == main_user %}selected{% endif %}>
+                    {{ user.title }}{% if user.is_admin %} (administrator){% endif %}
+                </option>
+                {% endfor %}
+            </select>
+            <p class="help-text">Always monitored, like the Plex server owner. Usually your own account.</p>
+        </div>
+
+        <div class="form-group">
+            <label class="checkbox-item" style="background: none; padding: 0;">
+                <input type="checkbox" name="users_toggle" id="users_toggle"
+                       {% if users_toggle %}checked{% endif %}
+                       onchange="toggleUserList()">
+                <div class="checkbox-label">
+                    <strong>Monitor Other Users</strong>
+                    <span>Also cache other Jellyfin users' Continue Watching and Next Up</span>
+                </div>
+            </label>
+        </div>
+
+        <div id="user-list" style="{% if not users_toggle %}display: none;{% endif %}">
+            <div class="form-group">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                    <label style="margin: 0;">Jellyfin Users</label>
+                    <button type="button" id="select-all-btn" class="btn btn-secondary" style="padding: 0.4rem 0.75rem; font-size: 0.85rem;" onclick="toggleSelectAll()">
+                        <i data-lucide="check-square" style="width: 14px; height: 14px;"></i>
+                        Select All
+                    </button>
+                </div>
+                <div class="checkbox-group" id="user-checkboxes">
+                    {% for user in users %}
+                    <label class="checkbox-item user-row" data-user="{{ user.title }}" style="cursor: pointer;">
+                        <input type="checkbox" name="track_user" value="{{ user.title }}"
+                               {% if user.tracked %}checked{% endif %}>
+                        <div class="checkbox-label">
+                            <strong>{{ user.title }}</strong>
+                            <span>{% if user.is_admin %}Administrator{% else %}User{% endif %}</span>
+                        </div>
+                    </label>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+
+        <div class="alert alert-info" style="margin-top: 1rem;">
+            <i data-lucide="info"></i>
+            <div>
+                Jellyfin has no Watchlist, so only Continue Watching and Next Up are cached.
+                You can change users later in <strong>Settings &gt; Jellyfin</strong>.
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="setup-footer">
+        <a href="/setup?step=3" class="btn btn-secondary">
+            <i data-lucide="arrow-left"></i>
+            Back
+        </a>
+        <button type="submit" class="btn btn-primary" id="next-btn" {% if not users %}disabled{% endif %}>
+            <span class="btn-text">Next</span>
+            <i data-lucide="arrow-right" class="btn-icon"></i>
+        </button>
+    </div>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function toggleUserList() {
+        const checkbox = document.getElementById('users_toggle');
+        document.getElementById('user-list').style.display = checkbox.checked ? 'block' : 'none';
+    }
+
+    // The main user is always monitored, so hide them from the "other users" list.
+    function syncMainUser() {
+        const select = document.getElementById('jellyfin_user');
+        if (!select) return;
+        document.querySelectorAll('.user-row').forEach(row => {
+            const isMain = row.dataset.user === select.value;
+            row.style.display = isMain ? 'none' : '';
+            if (isMain) row.querySelector('input').checked = false;
+        });
+        updateSelectAllButton();
+    }
+
+    function visibleUserBoxes() {
+        return Array.from(document.querySelectorAll('.user-row'))
+            .filter(row => row.style.display !== 'none')
+            .map(row => row.querySelector('input'));
+    }
+
+    function toggleSelectAll() {
+        const boxes = visibleUserBoxes();
+        const allSelected = boxes.length > 0 && boxes.every(cb => cb.checked);
+        boxes.forEach(cb => { cb.checked = !allSelected; });
+        updateSelectAllButton();
+    }
+
+    function updateSelectAllButton() {
+        const btn = document.getElementById('select-all-btn');
+        if (!btn) return;
+        const boxes = visibleUserBoxes();
+        const allSelected = boxes.length > 0 && boxes.every(cb => cb.checked);
+        btn.innerHTML = allSelected
+            ? '<i data-lucide="square" style="width: 14px; height: 14px;"></i> Deselect All'
+            : '<i data-lucide="check-square" style="width: 14px; height: 14px;"></i> Select All';
+        lucide.createIcons();
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+        const container = document.getElementById('user-checkboxes');
+        if (container) container.addEventListener('change', updateSelectAllButton);
+        syncMainUser();
+    });
+</script>
+{% endblock %}

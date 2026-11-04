@@ -272,9 +272,12 @@
                 </button>
             </form>
 
+            {% if plex_login is not defined or plex_login %}
             <div class="login-divider">Or sign in with</div>
             {% endif %}
+            {% endif %}
 
+            {% if plex_login is not defined or plex_login %}
             <!-- Plex OAuth -->
             <div id="oauth-section">
                 <button type="button" class="btn-plex" id="plex-oauth-btn" onclick="startPlexOAuth()">
@@ -293,6 +296,12 @@
                     <span id="oauth-error-text"></span>
                 </div>
             </div>
+            {% elif not password_enabled %}
+            <div class="login-error">
+                <i data-lucide="alert-circle"></i>
+                <span>No sign-in method is configured. Enable password login in plexcache_settings.json.</span>
+            </div>
+            {% endif %}
         </div>
     </div>
 

@@ -16,7 +16,7 @@
             <h3 style="margin: 0 0 1rem 0; font-size: 1rem; color: var(--text-secondary);">Configuration Summary</h3>
 
             <div class="summary-item">
-                <span class="label">Plex Server</span>
+                <span class="label">{{ server_label | default('Plex') }} Server</span>
                 <span class="value success">
                     <i data-lucide="check-circle" style="width: 14px; height: 14px; margin-right: 4px;"></i>
                     Connected
@@ -25,7 +25,7 @@
 
             <div class="summary-item">
                 <span class="label">Libraries</span>
-                <span class="value">{{ libraries_count }} selected</span>
+                <span class="value">{% if libraries_count %}{{ libraries_count }} selected{% elif media_server == 'jellyfin' %}All libraries{% else %}{{ libraries_count }} selected{% endif %}</span>
             </div>
 
             <div class="summary-item">

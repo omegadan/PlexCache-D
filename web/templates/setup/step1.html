@@ -10,10 +10,10 @@
         <h2>Welcome to PlexCache-D</h2>
         <p class="description">
             {% if is_unraid %}
-            Intelligent media caching for Plex on Unraid. Cache your frequently-accessed
+            Intelligent media caching for Plex or Jellyfin on Unraid. Cache your frequently-accessed
             media to a fast SSD while keeping the rest on your array.
             {% else %}
-            Intelligent media caching for Plex. Cache your frequently-accessed
+            Intelligent media caching for Plex or Jellyfin. Cache your frequently-accessed
             media to a fast drive while keeping the rest on your storage pool.
             {% endif %}
         </p>
@@ -21,7 +21,7 @@
         <ul class="feature-list" style="text-align: left;">
             <li>
                 <i data-lucide="check-circle"></i>
-                <span>Automatically cache OnDeck and Watchlist media</span>
+                <span>Automatically cache OnDeck / Continue Watching and Watchlist media</span>
             </li>
             <li>
                 <i data-lucide="check-circle"></i>
@@ -96,7 +96,7 @@
                     </button>
                 </div>
                 <p style="margin: 0.75rem 0 0 0; font-size: 0.8rem; color: var(--plex-text-muted); text-align: center;">
-                    After import, you'll verify the Plex connection (URL may differ in Docker)
+                    After import, you'll verify the server connection (URL may differ in Docker)
                 </p>
 
                 <div id="import-error" class="alert alert-error" style="display: none; margin-top: 1rem;">

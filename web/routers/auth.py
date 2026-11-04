@@ -36,6 +36,11 @@ def _get_client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
+def _plex_login_available(settings) -> bool:
+    """Plex sign-in is offered only when Plex is the media server."""
+    return str(settings.get("media_server", "plex") or "plex").strip().lower() != "jellyfin"
+
+
 @router.get("/login", response_class=HTMLResponse)
 def login_page(request: Request, next: str = "/"):
     """Render login page."""
@@ -60,6 +65,7 @@ def login_page(request: Request, next: str = "/"):
         {
             "next_url": safe_next,
             "password_enabled": password_enabled,
+            "plex_login": _plex_login_available(settings),
             "error": None,
         },
     )
@@ -209,6 +215,7 @@ def password_login(
             {
                 "next_url": safe_next,
                 "password_enabled": settings.get("auth_password_enabled", False),
+                "plex_login": _plex_login_available(settings),
                 "error": f"Too many login attempts. Try again in {retry_after} seconds.",
             },
             status_code=429,
@@ -244,6 +251,7 @@ def password_login(
         {
             "next_url": safe_next,
             "password_enabled": settings.get("auth_password_enabled", False),
+            "plex_login": _plex_login_available(settings),
             "error": "Invalid username or password",
         },
         status_code=401,
