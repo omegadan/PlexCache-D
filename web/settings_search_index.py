@@ -32,6 +32,56 @@ from typing import Any, Dict, List
 # Icon vocabulary aligns with lucide icons already used elsewhere in the UI.
 # Tones map to the .result-icon.tone-* classes in custom.css.
 _INDEX: List[Dict[str, Any]] = [
+    # --- Jellyfin ----------------------------------------------------------
+    {
+        "tab": "jellyfin", "setting_id": "media_server",
+        "label": "Media Server", "hint": "Choose Plex or Jellyfin for caching runs.",
+        "section": "Jellyfin", "subsection": "Media Server",
+        "icon": "server", "tone": "",
+        "keywords": ["jellyfin", "plex", "media server", "backend", "emby"],
+    },
+    {
+        "tab": "jellyfin", "setting_id": "jellyfin_url",
+        "label": "Jellyfin URL", "hint": "Base URL of your Jellyfin server.",
+        "section": "Jellyfin", "subsection": "Jellyfin Connection",
+        "icon": "link", "tone": "",
+        "keywords": ["jellyfin", "url", "host", "address", "server", "8096", "ip"],
+    },
+    {
+        "tab": "jellyfin", "setting_id": "jellyfin_api_key",
+        "label": "Jellyfin API Key", "hint": "Created under Dashboard → API Keys in Jellyfin.",
+        "section": "Jellyfin", "subsection": "Jellyfin Connection",
+        "icon": "key", "tone": "tone-warn",
+        "keywords": ["jellyfin", "api key", "token", "auth", "credentials"],
+    },
+    {
+        "tab": "jellyfin", "setting_id": "jellyfin_user",
+        "label": "Jellyfin Main User", "hint": "Always tracked. Empty = first administrator.",
+        "section": "Jellyfin", "subsection": "Jellyfin Connection",
+        "icon": "user", "tone": "",
+        "keywords": ["jellyfin", "user", "owner", "admin", "main"],
+    },
+    {
+        "tab": "jellyfin", "setting_id": "jellyfin_libraries",
+        "label": "Jellyfin Libraries", "hint": "Libraries to monitor. Empty = all video libraries.",
+        "section": "Jellyfin", "subsection": "Jellyfin Connection",
+        "icon": "library", "tone": "",
+        "keywords": ["jellyfin", "libraries", "sections", "movies", "tv"],
+    },
+    {
+        "tab": "jellyfin", "setting_id": "jellyfin_users",
+        "label": "Jellyfin Users", "hint": "Which other users' Continue Watching / Next Up to cache.",
+        "section": "Jellyfin", "subsection": "Other Users",
+        "icon": "users", "tone": "",
+        "keywords": ["jellyfin", "users", "multi-user", "next up", "continue watching"],
+    },
+    {
+        "tab": "jellyfin", "setting_id": "jellyfin_test",
+        "label": "Test Jellyfin Connection", "hint": "Check the saved URL and API key.",
+        "section": "Jellyfin", "subsection": "Jellyfin Connection",
+        "icon": "plug", "tone": "",
+        "keywords": ["jellyfin", "test", "connection", "check"],
+    },
     # --- Plex Server -------------------------------------------------------
     {
         "tab": "plex", "setting_id": "plex_url",

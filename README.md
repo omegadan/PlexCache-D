@@ -128,6 +128,44 @@ python3 plexcache.py --web --port 8080     # Custom port
 
 > **Note:** When running via Docker, the default port is **5757**. When running via CLI, the default port is **5000**.
 
+## Jellyfin Support (fork)
+
+PlexCache-D can use a Jellyfin server instead of Plex for the caching run. Pick the
+backend with `media_server` (`"plex"` by default, or `"jellyfin"`), either in
+**Settings → Jellyfin** in the Web UI or in `plexcache_settings.json`:
+
+```json
+{
+    "media_server": "jellyfin",
+    "JELLYFIN_URL": "http://192.168.1.10:8096",
+    "JELLYFIN_API_KEY": "<Dashboard → API Keys>",
+    "jellyfin_user": "dan",
+    "jellyfin_libraries": ["Movies", "TV Shows"],
+    "jellyfin_users": [
+        {"title": "partner", "skip_ondeck": false, "days_to_monitor": 14},
+        {"title": "kid", "skip_ondeck": true}
+    ]
+}
+```
+
+| Setting | Meaning |
+|---|---|
+| `JELLYFIN_URL`, `JELLYFIN_API_KEY` | Server address and an API key created under Dashboard → API Keys. One key reads every user's state; no per-user tokens are needed. |
+| `jellyfin_user` | Main user, always tracked (the equivalent of the Plex server owner). Empty = first administrator. |
+| `jellyfin_libraries` | Library names or ids to monitor. Empty = every video library. |
+| `jellyfin_users` | Other users. With `users_toggle` on, users with `skip_ondeck: false` are tracked. Users found on the server but not listed here are added automatically with tracking **off**. |
+
+What is cached in Jellyfin mode:
+
+- **OnDeck** = each tracked user's *Continue Watching* (movies and episodes) plus *Next Up*, filtered by `days_to_monitor`.
+- For episodes, the next `number_episodes` episodes (and `prefetch_minimum_minutes`) are prefetched, using the same rules as Plex.
+- Files being played right now are skipped (or the run exits, if `exit_if_active_session` is set).
+- Moving watched media back to the array, retention, eviction, the `.plexcached` backups and Unraid mover exclusions all work the same as with Plex.
+
+Set each path mapping's **Plex path** (`plex_path`) to the path *Jellyfin* reports for that library.
+
+Not supported with Jellyfin yet: Watchlist (Jellyfin has no watchlist, so the watchlist toggles are ignored), pinned media, recently-added, duplicate detection, the setup wizard and Plex sign-in for the Web UI.
+
 ## Docker Installation (Recommended for Unraid)
 
 PlexCache-D is available as a Docker container, ideal for Unraid users.

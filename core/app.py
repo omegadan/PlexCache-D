@@ -29,6 +29,7 @@ from core.config import ConfigManager
 from core.logging_config import LoggingManager, reset_warning_error_flag
 from core.system_utils import SystemDetector, FileUtils, SingleInstanceLock, get_disk_usage, get_array_direct_path, detect_zfs, set_zfs_prefixes, format_bytes, create_dir_with_ownership, check_cache_share_alignment, cleanup_empty_parent_folders, resolve_cache_boundary, sweep_empty_folders
 from core.plex_api import PlexManager, OnDeckItem
+from core.jellyfin_api import JellyfinManager, JellyfinSession
 from core.file_operations import MultiPathModifier, SiblingFileFinder, FileFilter, FileMover, PlexcachedRestorer, CacheTimestampTracker, WatchlistTracker, OnDeckTracker, CachePriorityManager, PlexcachedMigration, get_media_identity, find_matching_plexcached, is_directory_level_file, is_video_file, save_json_atomically
 from core.pinned_media import PinnedMediaTracker, resolve_pins_to_paths
 
@@ -558,8 +559,24 @@ class PlexCacheApp:
 
         return False
 
+    def _is_jellyfin(self) -> bool:
+        """True when settings select Jellyfin as the media server."""
+        return getattr(self.config_manager, 'media_server', 'plex') == 'jellyfin'
+
     def _init_plex_manager(self) -> None:
-        """Initialize the Plex manager with token cache."""
+        """Initialize the media server manager (Plex, or Jellyfin when configured)."""
+        if self._is_jellyfin():
+            logging.debug("Initializing Jellyfin manager...")
+            jf = self.config_manager.jellyfin
+            self.plex_manager = JellyfinManager(
+                jellyfin_url=jf.jellyfin_url,
+                api_key=jf.jellyfin_api_key,
+                main_user=jf.jellyfin_user,
+                libraries=jf.jellyfin_libraries,
+                retry_limit=self.config_manager.performance.retry_limit,
+                delay=self.config_manager.performance.delay,
+            )
+            return
         logging.debug("Initializing Plex manager...")
         token_cache_file = str(self.config_manager.get_user_tokens_file())
         rss_cache_file = str(self.config_manager.get_rss_cache_file())
@@ -1037,18 +1054,26 @@ class PlexCacheApp:
             if existing:
                 continue
 
-            # Ensure settings_data['users'] exists and is linked to plex.users
-            if 'users' not in self.config_manager.settings_data:
-                self.config_manager.settings_data['users'] = []
-                self.config_manager.plex.users = self.config_manager.settings_data['users']
+            # Ensure the backend's users list exists in settings_data and is linked
+            # to plex.users ('users' for Plex, 'jellyfin_users' for Jellyfin)
+            users_key = 'jellyfin_users' if self._is_jellyfin() else 'users'
+            if users_key not in self.config_manager.settings_data:
+                self.config_manager.settings_data[users_key] = []
+                self.config_manager.plex.users = self.config_manager.settings_data[users_key]
 
             # Add user (plex.users and settings_data['users'] are the same list reference)
             self.config_manager.plex.users.append(user_info)
 
-            logging.warning(
-                f"[PLEX API] Auto-added new user '{username}' with tracking disabled. "
-                f"Enable via Settings > Plex or re-run Setup wizard."
-            )
+            if users_key == 'jellyfin_users':
+                logging.warning(
+                    f"[JELLYFIN] Auto-added new user '{username}' with tracking disabled. "
+                    f"Set skip_ondeck to false for this user under 'jellyfin_users' to track them."
+                )
+            else:
+                logging.warning(
+                    f"[PLEX API] Auto-added new user '{username}' with tracking disabled. "
+                    f"Enable via Settings > Plex or re-run Setup wizard."
+                )
             added_count += 1
 
         # Save updated settings
@@ -1088,6 +1113,9 @@ class PlexCacheApp:
 
     def _get_media_path_from_session(self, session) -> Optional[str]:
         """Extract media file path from a Plex session. Returns None if unable to extract."""
+        if isinstance(session, JellyfinSession):
+            logging.debug(f"Active session detected, skipping: {session.title}")
+            return session.file_path
         try:
             media = str(session.source())
             # Use regex for safer parsing: extract ID between first two colons
@@ -1386,6 +1414,15 @@ class PlexCacheApp:
         pin_entries = self.pinned_tracker.list_pins()
         if not pin_entries:
             logging.debug("No pinned media configured")
+            return
+
+        if self._is_jellyfin():
+            # Pins store Plex rating keys and are created from the Plex-only
+            # web UI; they cannot be resolved against a Jellyfin server.
+            logging.warning(
+                f"[PINNED] {len(pin_entries)} pinned item(s) ignored - pinned media "
+                f"is not supported with Jellyfin yet"
+            )
             return
 
         preference = self.config_manager.plex.pinned_preferred_resolution or "highest"

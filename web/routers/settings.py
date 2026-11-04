@@ -179,6 +179,111 @@ def test_plex_connection(request: Request):
         )
 
 
+def _jellyfin_user_rows(settings_service, settings: Dict[str, Any]) -> tuple:
+    """Merge saved jellyfin_users with the server's user list for the form.
+
+    Returns (rows, error). Each row: {title, tracked, is_saved}. Saved users are
+    tracked unless skip_ondeck is set, matching how the run treats them.
+    """
+    saved = {u.get("title"): u for u in settings.get("jellyfin_users", []) if u.get("title")}
+    names = list(saved)
+    error = ""
+    if settings.get("jellyfin_url") and settings.get("jellyfin_api_key"):
+        ok, message, _info, users = settings_service.check_jellyfin_connection()
+        if ok:
+            for u in users:
+                if u.get("Name") and not (u.get("Policy") or {}).get("IsDisabled") and u["Name"] not in saved:
+                    names.append(u["Name"])
+        else:
+            error = message
+    rows = [{
+        "title": n,
+        "tracked": n in saved and not saved[n].get("skip_ondeck"),
+        "is_saved": n in saved,
+    } for n in names]
+    return rows, error
+
+
+@router.get("/jellyfin", response_class=HTMLResponse)
+def settings_jellyfin(request: Request):
+    """Media server selection + Jellyfin connection settings tab"""
+    settings_service = get_settings_service()
+    settings = settings_service.get_jellyfin_settings()
+    user_rows, user_error = _jellyfin_user_rows(settings_service, settings)
+
+    return templates.TemplateResponse(
+        request,
+        "settings/jellyfin.html",
+        {
+            "page_title": "Jellyfin Settings",
+            "active_tab": "jellyfin",
+            "settings": settings,
+            "user_rows": user_rows,
+            "user_error": user_error,
+        }
+    )
+
+
+@router.post("/jellyfin/test", response_class=HTMLResponse)
+def test_jellyfin_connection(request: Request):
+    """Test the saved Jellyfin connection"""
+    settings_service = get_settings_service()
+    ok, message, info, users = settings_service.check_jellyfin_connection()
+    if ok:
+        message = (f"Connected to '{info.get('ServerName', 'Jellyfin')}' "
+                   f"(version {info.get('Version', '?')}), {len(users)} user(s)")
+    return templates.TemplateResponse(
+        request,
+        "partials/alert.html",
+        {"type": "success" if ok else "error", "message": message}
+    )
+
+
+@router.put("/jellyfin", response_class=HTMLResponse)
+def save_jellyfin_settings(request: Request, form_data: ImmutableMultiDict = Depends(parse_form)):
+    """Save media server selection, Jellyfin connection and tracked users"""
+    settings_service = get_settings_service()
+
+    jellyfin_url = form_data.get("jellyfin_url", "").strip()
+    if jellyfin_url:
+        valid, error = _validate_outbound_url(jellyfin_url)
+        if not valid:
+            return templates.TemplateResponse(
+                request, "partials/alert.html", {"type": "error", "message": error}
+            )
+
+    libraries = [s.strip() for s in form_data.get("jellyfin_libraries", "").split(",")]
+
+    # Rebuild jellyfin_users: every listed user is saved, tracked ones with
+    # skip_ondeck false. Per-user extras (e.g. days_to_monitor) are preserved.
+    existing = {u.get("title"): u for u in settings_service.get_jellyfin_settings()["jellyfin_users"]}
+    tracked = set(form_data.getlist("track_user"))
+    users = []
+    for name in form_data.getlist("known_user"):
+        entry = dict(existing.get(name, {"title": name}))
+        entry["skip_ondeck"] = name not in tracked
+        entry["skip_watchlist"] = True
+        users.append(entry)
+
+    success = settings_service.save_jellyfin_settings({
+        "media_server": form_data.get("media_server", "plex"),
+        "jellyfin_url": jellyfin_url,
+        "jellyfin_api_key": form_data.get("jellyfin_api_key", ""),
+        "jellyfin_user": form_data.get("jellyfin_user", ""),
+        "jellyfin_libraries": libraries,
+        "jellyfin_users": users,
+        "users_toggle": form_data.get("users_toggle") in ("on", "true", "1"),
+    })
+    return templates.TemplateResponse(
+        request,
+        "partials/alert.html",
+        {
+            "type": "success" if success else "error",
+            "message": "Jellyfin settings saved" if success else "Failed to save settings",
+        }
+    )
+
+
 @router.put("/plex", response_class=HTMLResponse)
 def save_plex_settings(request: Request, form_data: ImmutableMultiDict = Depends(parse_form)):
     """Save Plex Server connection settings (URL + token only)"""

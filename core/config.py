@@ -130,6 +130,25 @@ class PlexConfig:
 
 
 @dataclass
+class JellyfinConfig:
+    """Configuration for a Jellyfin server (used when media_server == "jellyfin")."""
+    jellyfin_url: str = ""
+    jellyfin_api_key: str = ""
+    # Username whose Continue Watching / Next Up is always fetched (the
+    # equivalent of the Plex server owner). Empty = first administrator.
+    jellyfin_user: str = ""
+    # Library names or ids to monitor. Empty = every video library.
+    jellyfin_libraries: Optional[List[str]] = None
+
+    def __post_init__(self):
+        if self.jellyfin_libraries is None:
+            self.jellyfin_libraries = []
+
+
+SUPPORTED_MEDIA_SERVERS = ("plex", "jellyfin")
+
+
+@dataclass
 class CacheConfig:
     """Configuration for caching behavior."""
     watchlist_toggle: bool = True
@@ -385,6 +404,8 @@ class ConfigManager:
         self.notification = NotificationConfig()
         self.paths = PathConfig()
         self.plex = PlexConfig()
+        self.jellyfin = JellyfinConfig()
+        self.media_server = "plex"
         self.cache = CacheConfig()
         self.performance = PerformanceConfig()
         self.logging = LoggingConfig()
@@ -420,6 +441,7 @@ class ConfigManager:
         self.settings_data, self._path_settings_migrated = migrate_path_settings(self.settings_data)
 
         logging.debug("Processing configuration...")
+        self.media_server = self._resolve_media_server(self.settings_data)
         self._validate_required_fields()
         self._validate_types()
         self._process_first_start()
@@ -433,6 +455,29 @@ class ConfigManager:
 
         logging.debug("Configuration loaded and validated successfully")
     
+    @staticmethod
+    def _resolve_media_server(settings_data: Dict[str, Any]) -> str:
+        """Return the configured backend ("plex" or "jellyfin")."""
+        value = str(settings_data.get('media_server', 'plex') or 'plex').strip().lower()
+        if value not in SUPPORTED_MEDIA_SERVERS:
+            raise ValueError(
+                f"'media_server' must be one of {', '.join(SUPPORTED_MEDIA_SERVERS)}, got '{value}'"
+            )
+        return value
+
+    @property
+    def is_jellyfin(self) -> bool:
+        return self.media_server == "jellyfin"
+
+    @property
+    def users_settings_key(self) -> str:
+        """Settings key holding the per-user list for the active backend.
+
+        Jellyfin users live under their own key so switching backends never
+        mixes Plex accounts (with tokens) and Jellyfin accounts in one list.
+        """
+        return 'jellyfin_users' if self.is_jellyfin else 'users'
+
     def _process_first_start(self) -> None:
         """Handle first start configuration."""
         firststart = self.settings_data.get('firststart')
@@ -448,6 +493,7 @@ class ConfigManager:
     def _load_all_configs(self) -> None:
         """Load all configuration sections."""
         self._load_plex_config()
+        self._load_jellyfin_config()
         self._load_cache_config()
         self._load_path_config()
         self._load_performance_config()
@@ -457,10 +503,10 @@ class ConfigManager:
     
     def _load_plex_config(self) -> None:
         """Load Plex-related configuration."""
-        self.plex.plex_url = self.settings_data['PLEX_URL']
-        self.plex.plex_token = self.settings_data['PLEX_TOKEN']
+        self.plex.plex_url = self.settings_data.get('PLEX_URL', '')
+        self.plex.plex_token = self.settings_data.get('PLEX_TOKEN', '')
         self.plex.number_episodes = self.settings_data['number_episodes']
-        self.plex.valid_sections = self.settings_data['valid_sections']
+        self.plex.valid_sections = self.settings_data.get('valid_sections', [])
         self.plex.days_to_monitor = self.settings_data['days_to_monitor']
         self.plex.users_toggle = self.settings_data['users_toggle']
         self.plex.plex_db_path = self.settings_data.get('plex_db_path', '')
@@ -469,7 +515,7 @@ class ConfigManager:
         )
 
         # Load users list first (contains tokens and per-user skip settings)
-        self.plex.users = self.settings_data.get('users', [])
+        self.plex.users = self.settings_data.get(self.users_settings_key, [])
 
         # Auto-migrate legacy top-level skip lists to per-user booleans
         self._migrate_skip_lists_to_per_user()
@@ -537,10 +583,17 @@ class ConfigManager:
                     f"cache_eviction_mode to 'none'."
                 )
 
+    def _load_jellyfin_config(self) -> None:
+        """Load Jellyfin settings (present but unused when media_server is plex)."""
+        self.jellyfin.jellyfin_url = self.settings_data.get('JELLYFIN_URL', '')
+        self.jellyfin.jellyfin_api_key = self.settings_data.get('JELLYFIN_API_KEY', '')
+        self.jellyfin.jellyfin_user = self.settings_data.get('jellyfin_user', '')
+        self.jellyfin.jellyfin_libraries = list(self.settings_data.get('jellyfin_libraries', []) or [])
+
     def _load_cache_config(self) -> None:
         """Load cache-related configuration."""
-        self.cache.watchlist_toggle = self.settings_data['watchlist_toggle']
-        self.cache.watchlist_episodes = self.settings_data['watchlist_episodes']
+        self.cache.watchlist_toggle = self.settings_data.get('watchlist_toggle', False)
+        self.cache.watchlist_episodes = self.settings_data.get('watchlist_episodes', 5)
         self.cache.watched_move = self.settings_data['watched_move']
 
         # Load OnDeck prefetch minimum runtime (default 0 = disabled, backward compat)
@@ -549,6 +602,12 @@ class ConfigManager:
         # Load remote watchlist settings
         self.cache.remote_watchlist_toggle = self.settings_data.get('remote_watchlist_toggle', False)
         self.cache.remote_watchlist_rss_url = self.settings_data.get('remote_watchlist_rss_url', "")
+
+        if self.is_jellyfin and (self.cache.watchlist_toggle or self.cache.remote_watchlist_toggle):
+            # Jellyfin has no watchlist; ignore the toggles rather than fail.
+            logging.info("[CONFIG] Watchlist caching is not supported with Jellyfin - disabled for this run")
+            self.cache.watchlist_toggle = False
+            self.cache.remote_watchlist_toggle = False
 
         # Log deprecation warning for old cache expiry settings (these are now ignored)
         if 'watchlist_cache_expiry' in self.settings_data or 'watched_cache_expiry' in self.settings_data:
@@ -763,7 +822,7 @@ class ConfigManager:
 
         if migrated:
             # Update settings_data with migrated users
-            self.settings_data['users'] = self.plex.users
+            self.settings_data[self.users_settings_key] = self.plex.users
             logging.info(f"Migrated skip settings to per-user booleans")
 
         # Remove legacy fields and save
@@ -794,11 +853,15 @@ class ConfigManager:
 
         # Core required fields (always required)
         required_fields = [
-            'PLEX_URL', 'PLEX_TOKEN', 'number_episodes', 'valid_sections',
-            'days_to_monitor', 'users_toggle', 'watchlist_toggle',
-            'watchlist_episodes', 'watched_move', 'cache_dir',
+            'number_episodes', 'days_to_monitor', 'users_toggle',
+            'watched_move', 'cache_dir',
             'max_concurrent_moves_array', 'max_concurrent_moves_cache'
         ]
+        if self.media_server == "jellyfin":
+            required_fields[:0] = ['JELLYFIN_URL', 'JELLYFIN_API_KEY']
+        else:
+            required_fields[:0] = ['PLEX_URL', 'PLEX_TOKEN', 'valid_sections']
+            required_fields.extend(['watchlist_toggle', 'watchlist_episodes'])
 
         # Legacy path fields (only required if path_mappings not configured)
         if not has_path_mappings:
@@ -824,6 +887,10 @@ class ConfigManager:
         type_checks = {
             'PLEX_URL': str,
             'PLEX_TOKEN': str,
+            'JELLYFIN_URL': str,
+            'JELLYFIN_API_KEY': str,
+            'jellyfin_user': str,
+            'jellyfin_libraries': list,
             'number_episodes': int,
             'valid_sections': list,
             'days_to_monitor': int,
@@ -890,11 +957,14 @@ class ConfigManager:
             if value < 0:
                 errors.append(f"'{field}' must be non-negative, got {value}")
 
-        # Validate non-empty URL and token
-        if not self.settings_data.get('PLEX_URL', '').strip():
-            errors.append("'PLEX_URL' cannot be empty")
-        if not self.settings_data.get('PLEX_TOKEN', '').strip():
-            errors.append("'PLEX_TOKEN' cannot be empty")
+        # Validate non-empty URL and token for the active backend
+        if self.media_server == "jellyfin":
+            credential_fields = ['JELLYFIN_URL', 'JELLYFIN_API_KEY']
+        else:
+            credential_fields = ['PLEX_URL', 'PLEX_TOKEN']
+        for field in credential_fields:
+            if not self.settings_data.get(field, '').strip():
+                errors.append(f"'{field}' cannot be empty")
 
         if errors:
             error_msg = "Configuration validation errors: " + "; ".join(errors)

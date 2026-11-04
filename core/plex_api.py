@@ -453,6 +453,73 @@ class UserTokenCache:
             logging.warning(f"[TOKEN CACHE] Could not save cache file: {e}")
 
 
+def select_next_episodes(episodes: List[Any], current_season: int,
+                         current_episode_index: int, number_episodes: int,
+                         prefetch_minimum_minutes: int = 0) -> List[Any]:
+    """Get the next episodes after the current one.
+
+    Server-agnostic: works on any objects exposing ``parentIndex``, ``index``,
+    ``title``, ``grandparentTitle`` and ``duration`` (milliseconds), so the
+    Plex and Jellyfin backends share one prefetch policy.
+
+    `number_episodes` is the minimum number of episodes to return. When
+    `prefetch_minimum_minutes` > 0, additional episodes are appended until
+    their summed runtime meets or exceeds that target. Episodes missing
+    duration metadata are weighted with the running average of episodes
+    already collected (or a 45-minute fallback when no data is available
+    yet) — biased toward fetching one too many rather than too few.
+    """
+    next_episodes: List[Episode] = []
+    total_minutes = 0.0
+    duration_sum = 0.0
+    duration_count = 0
+    # Used when no prior episode has duration metadata yet.
+    FALLBACK_MINUTES = 45.0
+
+    def _minutes_from_ms(d_ms) -> float:
+        # Plex stores duration in milliseconds. Fall back to the running
+        # average when the metadata is missing, or to FALLBACK_MINUTES when
+        # no real duration has been seen yet.
+        if d_ms and d_ms > 0:
+            return d_ms / 60000.0
+        if duration_count > 0:
+            return duration_sum / duration_count
+        return FALLBACK_MINUTES
+
+    def _target_met() -> bool:
+        return (len(next_episodes) >= number_episodes
+                and total_minutes >= prefetch_minimum_minutes)
+
+    for episode in episodes:
+        # Skip episodes with missing index data
+        if episode.parentIndex is None or episode.index is None:
+            logging.debug(f"Skipping episode '{episode.title}' from '{episode.grandparentTitle}' - missing index data (parentIndex={episode.parentIndex}, index={episode.index})")
+            continue
+        if not (episode.parentIndex > current_season or
+                (episode.parentIndex == current_season and episode.index > current_episode_index)):
+            continue
+        if _target_met():
+            break
+        d_ms = getattr(episode, 'duration', None)
+        ep_minutes = _minutes_from_ms(d_ms)
+        next_episodes.append(episode)
+        total_minutes += ep_minutes
+        if d_ms and d_ms > 0:
+            duration_sum += d_ms / 60000.0
+            duration_count += 1
+        if _target_met():
+            break
+    if prefetch_minimum_minutes > 0:
+        show_name = getattr(next_episodes[0], 'grandparentTitle', '?') if next_episodes else '?'
+        logging.debug(
+            f"Prefetch buffer for {show_name!r}: {len(next_episodes)} eps, "
+            f"total {total_minutes:.1f} min "
+            f"(min count={number_episodes}, min runtime={prefetch_minimum_minutes} min, "
+            f"real durations seen={duration_count})"
+        )
+    return next_episodes
+
+
 class PlexManager:
     """Manages Plex server connections and operations."""
 
@@ -1214,64 +1281,11 @@ class PlexManager:
     def _get_next_episodes(self, episodes: List[Episode], current_season: int,
                           current_episode_index: int, number_episodes: int,
                           prefetch_minimum_minutes: int = 0) -> List[Episode]:
-        """Get the next episodes after the current one.
-
-        `number_episodes` is the minimum number of episodes to return. When
-        `prefetch_minimum_minutes` > 0, additional episodes are appended until
-        their summed runtime meets or exceeds that target. Episodes missing
-        duration metadata are weighted with the running average of episodes
-        already collected (or a 45-minute fallback when no data is available
-        yet) — biased toward fetching one too many rather than too few.
-        """
-        next_episodes: List[Episode] = []
-        total_minutes = 0.0
-        duration_sum = 0.0
-        duration_count = 0
-        # Used when no prior episode has duration metadata yet.
-        FALLBACK_MINUTES = 45.0
-
-        def _minutes_from_ms(d_ms) -> float:
-            # Plex stores duration in milliseconds. Fall back to the running
-            # average when the metadata is missing, or to FALLBACK_MINUTES when
-            # no real duration has been seen yet.
-            if d_ms and d_ms > 0:
-                return d_ms / 60000.0
-            if duration_count > 0:
-                return duration_sum / duration_count
-            return FALLBACK_MINUTES
-
-        def _target_met() -> bool:
-            return (len(next_episodes) >= number_episodes
-                    and total_minutes >= prefetch_minimum_minutes)
-
-        for episode in episodes:
-            # Skip episodes with missing index data
-            if episode.parentIndex is None or episode.index is None:
-                logging.debug(f"Skipping episode '{episode.title}' from '{episode.grandparentTitle}' - missing index data (parentIndex={episode.parentIndex}, index={episode.index})")
-                continue
-            if not (episode.parentIndex > current_season or
-                    (episode.parentIndex == current_season and episode.index > current_episode_index)):
-                continue
-            if _target_met():
-                break
-            d_ms = getattr(episode, 'duration', None)
-            ep_minutes = _minutes_from_ms(d_ms)
-            next_episodes.append(episode)
-            total_minutes += ep_minutes
-            if d_ms and d_ms > 0:
-                duration_sum += d_ms / 60000.0
-                duration_count += 1
-            if _target_met():
-                break
-        if prefetch_minimum_minutes > 0:
-            show_name = getattr(next_episodes[0], 'grandparentTitle', '?') if next_episodes else '?'
-            logging.debug(
-                f"Prefetch buffer for {show_name!r}: {len(next_episodes)} eps, "
-                f"total {total_minutes:.1f} min "
-                f"(min count={number_episodes}, min runtime={prefetch_minimum_minutes} min, "
-                f"real durations seen={duration_count})"
-            )
-        return next_episodes
+        """Get the next episodes after the current one (see ``select_next_episodes``)."""
+        return select_next_episodes(
+            episodes, current_season, current_episode_index, number_episodes,
+            prefetch_minimum_minutes=prefetch_minimum_minutes,
+        )
 
     def clean_rss_title(self, title: str) -> str:
         """Remove trailing year in parentheses from a title, e.g. 'Movie (2023)' -> 'Movie'."""

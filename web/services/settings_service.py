@@ -220,6 +220,73 @@ class SettingsService:
 
         return result
 
+    # ------------------------------------------------------------------
+    # Media server selection / Jellyfin
+    # ------------------------------------------------------------------
+    def get_media_server(self) -> str:
+        """Active backend: "plex" (default) or "jellyfin"."""
+        value = str(self._load_raw().get("media_server", "plex") or "plex").strip().lower()
+        return value if value in ("plex", "jellyfin") else "plex"
+
+    def get_jellyfin_settings(self) -> Dict[str, Any]:
+        raw = self._load_raw()
+        return {
+            "media_server": self.get_media_server(),
+            "jellyfin_url": raw.get("JELLYFIN_URL", ""),
+            "jellyfin_api_key": raw.get("JELLYFIN_API_KEY", ""),
+            "jellyfin_user": raw.get("jellyfin_user", ""),
+            "jellyfin_libraries": raw.get("jellyfin_libraries", []) or [],
+            "jellyfin_users": raw.get("jellyfin_users", []) or [],
+            "users_toggle": raw.get("users_toggle", True),
+        }
+
+    def save_jellyfin_settings(self, settings: Dict[str, Any]) -> bool:
+        raw = self._load_raw()
+        media_server = str(settings.get("media_server", raw.get("media_server", "plex"))).strip().lower()
+        if media_server not in ("plex", "jellyfin"):
+            return False
+        raw["media_server"] = media_server
+        if "jellyfin_url" in settings:
+            raw["JELLYFIN_URL"] = settings["jellyfin_url"].strip().rstrip("/")
+        if "jellyfin_api_key" in settings:
+            raw["JELLYFIN_API_KEY"] = settings["jellyfin_api_key"].strip()
+        if "jellyfin_user" in settings:
+            raw["jellyfin_user"] = settings["jellyfin_user"].strip()
+        if "jellyfin_libraries" in settings:
+            raw["jellyfin_libraries"] = [s for s in settings["jellyfin_libraries"] if s]
+        if "jellyfin_users" in settings:
+            raw["jellyfin_users"] = settings["jellyfin_users"]
+        if "users_toggle" in settings:
+            raw["users_toggle"] = bool(settings["users_toggle"])
+        # Fields the core run requires regardless of backend; seed defaults so a
+        # Jellyfin-only install created from this page loads cleanly.
+        raw.setdefault("number_episodes", 5)
+        raw.setdefault("days_to_monitor", 183)
+        raw.setdefault("users_toggle", True)
+        raw.setdefault("watched_move", True)
+        return self._save_raw(raw)
+
+    def check_jellyfin_connection(self, url: Optional[str] = None,
+                                  api_key: Optional[str] = None) -> tuple:
+        """Return (ok, message, server_info, users) for the Jellyfin server."""
+        settings = self.get_jellyfin_settings()
+        url = (url if url is not None else settings["jellyfin_url"]).rstrip("/")
+        api_key = api_key if api_key is not None else settings["jellyfin_api_key"]
+        if not url or not api_key:
+            return False, "Missing Jellyfin URL or API key. Save settings first.", {}, []
+        import requests
+        headers = {"X-Emby-Token": api_key, "Accept": "application/json"}
+        try:
+            info = requests.get(f"{url}/System/Info", headers=headers, timeout=5)
+            if info.status_code in (401, 403):
+                return False, "Jellyfin rejected the API key.", {}, []
+            info.raise_for_status()
+            users = requests.get(f"{url}/Users", headers=headers, timeout=5)
+            users.raise_for_status()
+            return True, "", info.json(), users.json()
+        except (requests.RequestException, OSError, ValueError) as e:
+            return False, f"Cannot reach Jellyfin: {str(e)[:150]}", {}, []
+
     def get_path_mappings(self) -> List[Dict[str, Any]]:
         """Get path mappings"""
         raw = self._load_raw()
@@ -906,7 +973,9 @@ class SettingsService:
         return self._save_raw(raw)
 
     def check_plex_connection(self) -> bool:
-        """Check if Plex server is reachable"""
+        """Check if the configured media server (Plex or Jellyfin) is reachable"""
+        if self.get_media_server() == "jellyfin":
+            return self.check_jellyfin_connection()[0]
         settings = self.get_plex_settings()
         plex_url = settings.get("plex_url", "")
         plex_token = settings.get("plex_token", "")

@@ -1,0 +1,119 @@
+{% extends "settings/index.html" %}
+
+{% block settings_content %}
+<form hx-put="/settings/jellyfin" hx-target="#settings-alert-container" hx-swap="innerHTML">
+<div class="card">
+    <div class="card-header">
+        <i data-lucide="server"></i>
+        <h2>Media Server</h2>
+    </div>
+    <div class="card-body">
+        <div class="form-group mb-0" data-setting-id="media_server">
+            <label for="media_server">Server used for caching runs</label>
+            <select id="media_server" name="media_server">
+                <option value="plex" {% if settings.media_server != 'jellyfin' %}selected{% endif %}>Plex</option>
+                <option value="jellyfin" {% if settings.media_server == 'jellyfin' %}selected{% endif %}>Jellyfin</option>
+            </select>
+            <div class="form-hint">
+                With Jellyfin, Continue Watching and Next Up are cached for the users ticked below.
+                Watchlist and pinned media are Plex-only and are skipped. Path mappings, cache and
+                eviction settings work the same: set each mapping's "Plex path" to the path Jellyfin
+                uses for that library.
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <i data-lucide="link"></i>
+        <h2>Jellyfin Connection</h2>
+    </div>
+    <div class="card-body">
+        <div class="grid grid-2">
+            <div class="form-group" data-setting-id="jellyfin_url">
+                <label for="jellyfin_url">Jellyfin URL</label>
+                <input type="text" id="jellyfin_url" name="jellyfin_url"
+                       value="{{ settings.jellyfin_url }}"
+                       placeholder="http://192.168.1.10:8096">
+            </div>
+            <div class="form-group" data-setting-id="jellyfin_api_key">
+                <label for="jellyfin_api_key">API Key</label>
+                <input type="password" id="jellyfin_api_key" name="jellyfin_api_key"
+                       value="{{ settings.jellyfin_api_key }}"
+                       placeholder="Dashboard → API Keys">
+                <div class="form-hint">Create one in Jellyfin under Dashboard → API Keys.</div>
+            </div>
+            <div class="form-group" data-setting-id="jellyfin_user">
+                <label for="jellyfin_user">Main user</label>
+                <input type="text" id="jellyfin_user" name="jellyfin_user"
+                       value="{{ settings.jellyfin_user }}"
+                       placeholder="Leave empty for the first administrator">
+                <div class="form-hint">Always tracked, like the Plex server owner.</div>
+            </div>
+            <div class="form-group mb-0" data-setting-id="jellyfin_libraries">
+                <label for="jellyfin_libraries">Libraries</label>
+                <input type="text" id="jellyfin_libraries" name="jellyfin_libraries"
+                       value="{{ settings.jellyfin_libraries | join(', ') }}"
+                       placeholder="Movies, TV Shows">
+                <div class="form-hint">Comma-separated names or ids. Empty = every video library.</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <i data-lucide="users"></i>
+        <h2>Other Users</h2>
+    </div>
+    <div class="card-body" data-setting-id="jellyfin_users">
+        <div class="form-group">
+            <label class="switch">
+                <input type="checkbox" name="users_toggle" {% if settings.users_toggle %}checked{% endif %}>
+                <span>Enable Multi-User Support</span>
+            </label>
+        </div>
+        {% if user_error %}
+        <p class="text-muted">Could not load users from Jellyfin: {{ user_error }}</p>
+        {% endif %}
+        {% if user_rows %}
+            {% for row in user_rows %}
+            <label class="flex gap-1" style="align-items: center; margin-bottom: 0.5rem;">
+                <input type="hidden" name="known_user" value="{{ row.title }}">
+                <input type="checkbox" name="track_user" value="{{ row.title }}" {% if row.tracked %}checked{% endif %}>
+                <span>{{ row.title }}</span>
+                {% if not row.is_saved %}<span class="text-muted">(new)</span>{% endif %}
+            </label>
+            {% endfor %}
+            <div class="form-hint">
+                Ticked users have their Continue Watching / Next Up cached too, when multi-user
+                support is on. The main user is always included.
+            </div>
+        {% elif not user_error %}
+        <p class="text-muted">Save the connection to load the server's users.</p>
+        {% endif %}
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body" style="padding: 1rem 1.25rem;">
+        <div class="form-group mb-0" style="display: flex; gap: 1rem; align-items: center;">
+            <button type="submit" class="btn btn-primary">
+                <i data-lucide="save"></i>
+                Save
+            </button>
+            <button type="button" class="btn btn-secondary"
+                    data-setting-id="jellyfin_test"
+                    hx-post="/settings/jellyfin/test"
+                    hx-target="#jellyfin-test-result"
+                    hx-swap="innerHTML">
+                <i data-lucide="plug"></i>
+                Test Connection
+            </button>
+            <div id="jellyfin-test-result"></div>
+        </div>
+    </div>
+</div>
+</form>
+{% endblock %}
