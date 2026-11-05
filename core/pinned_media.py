@@ -2,7 +2,8 @@
 
 Users can pin a show, season, episode, or movie to the cache so it is always
 kept cached and never evicted, regardless of OnDeck/Watchlist state or priority
-scoring. Backing store is ``data/pinned_media.json``, keyed by Plex rating_key.
+scoring. Backing store is ``data/pinned_media.json`` keyed by Plex rating_key
+(``data/pinned_media_jellyfin.json`` keyed by Jellyfin item id in Jellyfin mode).
 
 Divergence from OnDeck/Watchlist gathering
 -------------------------------------------
@@ -38,6 +39,30 @@ _PIN_FETCH_RETRY_WAIT = 2  # seconds between attempts
 
 
 VALID_PIN_TYPES = {"show", "season", "episode", "movie"}
+
+
+def pinned_media_filename(media_server: str = "plex") -> str:
+    """Tracker file name for a backend.
+
+    Jellyfin pins live in their own file: their keys are Jellyfin item ids, so
+    resolving Plex rating keys against Jellyfin (or the reverse) would mark
+    every pin orphaned and prune it. Separate files keep both sets intact
+    when switching backends.
+    """
+    if str(media_server or "").lower() == "jellyfin":
+        return "pinned_media_jellyfin.json"
+    return "pinned_media.json"
+
+
+def fetch_pin_item(server: Any, rating_key: Any) -> Any:
+    """``server.fetchItem`` for a pin key on either backend.
+
+    Plex rating keys are ints; Jellyfin item ids are GUID strings and must not
+    be ``int()``-ed (servers that take strings set ``accepts_string_keys``).
+    """
+    if getattr(server, "accepts_string_keys", False) is True:
+        return server.fetchItem(str(rating_key))
+    return server.fetchItem(int(rating_key))
 
 VALID_PREFERENCES = {"highest", "lowest", "1080p", "720p", "4k", "first"}
 
@@ -293,7 +318,7 @@ def resolve_pins_to_paths(
         for attempt in range(_PIN_FETCH_MAX_ATTEMPTS):
             try:
                 # plexapi.fetchItem accepts int or str rating_key
-                item = plex_server.fetchItem(int(rk))
+                item = fetch_pin_item(plex_server, rk)
                 break
             except TransientNetError as e:
                 # Check network errors BEFORE NotFound — some test environments
@@ -310,7 +335,7 @@ def resolve_pins_to_paths(
             except (NotFound, ValueError) as e:
                 if prune:
                     logging.warning(
-                        f"Pinned item no longer in Plex: '{title}' "
+                        f"Pinned item no longer on the media server: '{title}' "
                         f"(rating_key={rk}) — removing pin. ({type(e).__name__}: {e})"
                     )
                     tracker.remove_pin(rk)
@@ -647,7 +672,7 @@ def estimate_item_bytes(
     if plex_server is None or not rating_key:
         return 0
     try:
-        item = plex_server.fetchItem(int(rating_key))
+        item = fetch_pin_item(plex_server, rating_key)
     except Exception:
         return 0
     return estimate_item_size(item, pin_type or "movie", preference)

@@ -6,6 +6,7 @@ from typing import Any, Optional
 
 from core.config import ConfigManager
 from core.pinned_media import (
+    fetch_pin_item,
     PinnedMediaTracker,
     compute_budget_state,
     estimate_item_bytes,
@@ -83,7 +84,20 @@ def _preflight_budget(
 
 
 def _connect_plex(config_manager: ConfigManager):
-    """Connect to Plex server. Returns PlexServer instance or None."""
+    """Connect to the media server. Returns PlexServer (or JellyfinPinServer) or None."""
+    if getattr(config_manager, "is_jellyfin", False) is True:
+        jf = config_manager.jellyfin
+        if not jf.jellyfin_url or not jf.jellyfin_api_key:
+            print("Error: Jellyfin URL and API key must be configured. Run --setup first.")
+            return None
+        from core.jellyfin_pins import JellyfinPinServer
+        server = JellyfinPinServer(jf.jellyfin_url, jf.jellyfin_api_key)
+        try:
+            server.ping()
+        except Exception as e:
+            print(f"Error: Could not connect to Jellyfin server: {e}")
+            return None
+        return server
     plex_url = config_manager.plex.plex_url
     plex_token = config_manager.plex.plex_token
     if not plex_url or not plex_token:
@@ -129,7 +143,7 @@ def handle_list_pins(config_manager: ConfigManager) -> None:
             # Listing is read-only: it reports unresolvable pins but does not
             # remove them. The next full run prunes (prune=True there).
             print(
-                f"  {len(orphaned)} pin(s) could not be resolved in Plex "
+                f"  {len(orphaned)} pin(s) could not be resolved on the media server "
                 f"(removed on the next run if still missing)"
             )
 
@@ -147,9 +161,9 @@ def handle_pin(config_manager: ConfigManager, rating_key: str) -> None:
         return
 
     try:
-        item = plex.fetchItem(int(rating_key))
+        item = fetch_pin_item(plex, rating_key)
     except Exception as e:
-        print(f"Error: Could not fetch item {rating_key} from Plex: {e}")
+        print(f"Error: Could not fetch item {rating_key} from the media server: {e}")
         return
 
     pin_type = _derive_pin_type(item)
@@ -179,7 +193,7 @@ def handle_unpin(config_manager: ConfigManager, rating_key: str) -> None:
 
 
 def handle_pin_by_title(config_manager: ConfigManager, query: str) -> None:
-    """Handle --pin-by-title "title": search Plex and pin interactively."""
+    """Handle --pin-by-title "title": search the media server and pin interactively."""
     plex = _connect_plex(config_manager)
     if not plex:
         return

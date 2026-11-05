@@ -22,6 +22,7 @@ import threading
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from core.pinned_media import (
+    fetch_pin_item,
     PinnedMediaTracker,
     VALID_PIN_TYPES,
     resolve_pins_to_paths,
@@ -50,17 +51,44 @@ class PinnedService:
     """Business logic for pinned media (web layer)."""
 
     def __init__(self):
-        from web.dependencies import get_pinned_tracker
-        self._tracker: PinnedMediaTracker = get_pinned_tracker()
+        self._tracker_file = None
+        self._tracker_obj: Optional[PinnedMediaTracker] = None
+
+    @property
+    def _tracker(self) -> PinnedMediaTracker:
+        """Tracker for the active backend; reopened if the media server changes."""
+        from web.dependencies import get_pinned_tracker_file
+        tracker_file = get_pinned_tracker_file()
+        if self._tracker_obj is None or tracker_file != self._tracker_file:
+            self._tracker_obj = PinnedMediaTracker(str(tracker_file))
+            self._tracker_file = tracker_file
+        return self._tracker_obj
+
+    @_tracker.setter
+    def _tracker(self, tracker: PinnedMediaTracker) -> None:
+        """Use a fixed tracker (tests): it stays in place until the backend changes."""
+        from web.dependencies import get_pinned_tracker_file
+        self._tracker_obj = tracker
+        self._tracker_file = get_pinned_tracker_file()
 
     # ------------------------------------------------------------------
     # Plex helpers
     # ------------------------------------------------------------------
 
     def _get_plex_server(self) -> Optional[Any]:
-        """Connect to Plex using saved settings. Returns None if unavailable."""
+        """Connect to the media server using saved settings. None if unavailable.
+
+        In Jellyfin mode this is a ``JellyfinPinServer`` that answers the same
+        plexapi calls the pin code makes.
+        """
         from web.services import get_settings_service
         settings_service = get_settings_service()
+        if settings_service.get_media_server() == "jellyfin":
+            jf = settings_service.get_jellyfin_settings()
+            if not jf.get("jellyfin_url") or not jf.get("jellyfin_api_key"):
+                return None
+            from core.jellyfin_pins import JellyfinPinServer
+            return JellyfinPinServer(jf["jellyfin_url"], jf["jellyfin_api_key"])
         plex_settings = settings_service.get_plex_settings()
         plex_url = plex_settings.get("plex_url", "")
         plex_token = plex_settings.get("plex_token", "")
@@ -160,7 +188,7 @@ class PinnedService:
             return []
 
         try:
-            item = plex.fetchItem(int(rating_key))
+            item = fetch_pin_item(plex, rating_key)
         except Exception as e:
             logger.warning(f"PinnedService.expand: fetchItem({rating_key}) failed: {e}")
             return []
@@ -424,7 +452,7 @@ class PinnedService:
         if pin_type not in ("season", "episode") or plex is None:
             return fallback
         try:
-            item = plex.fetchItem(int(rating_key))
+            item = fetch_pin_item(plex, rating_key)
         except Exception:
             return fallback
 
@@ -592,7 +620,7 @@ class PinnedService:
             return result
 
         try:
-            item = plex.fetchItem(int(rating_key))
+            item = fetch_pin_item(plex, rating_key)
         except Exception:
             return result
 

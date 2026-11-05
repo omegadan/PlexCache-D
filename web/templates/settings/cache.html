@@ -466,7 +466,7 @@
                 <option value="4k" {% if settings.pinned_preferred_resolution == '4k' %}selected{% endif %}>4K (fallback to highest)</option>
                 <option value="1080p" {% if settings.pinned_preferred_resolution == '1080p' %}selected{% endif %}>1080p (fallback to highest)</option>
                 <option value="720p" {% if settings.pinned_preferred_resolution == '720p' %}selected{% endif %}>720p (fallback to highest)</option>
-                <option value="first" {% if settings.pinned_preferred_resolution == 'first' %}selected{% endif %}>First version (Plex default order)</option>
+                <option value="first" {% if settings.pinned_preferred_resolution == 'first' %}selected{% endif %}>First version (server default order)</option>
             </select>
             <div class="form-hint">Which version to cache when a pinned item has multiple media files (e.g., 4K + 1080p). Saved with <strong>Save Cache Settings</strong> in the Cache Behavior card above.</div>
         </div>
@@ -474,7 +474,7 @@
         <div class="form-group" data-setting-id="pinned_search">
             <label for="pinned-search-input">
                 <i data-lucide="search" style="width: 14px; height: 14px; vertical-align: middle;"></i>
-                Search Plex
+                Search {{ 'Jellyfin' if settings.media_server == 'jellyfin' else 'Plex' }}
             </label>
             <input type="text" id="pinned-search-input" name="q"
                    class="input-medium"

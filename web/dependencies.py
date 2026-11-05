@@ -82,10 +82,16 @@ def get_ondeck_tracker():
 
 
 def get_pinned_tracker():
-    """Get PinnedMediaTracker instance"""
+    """Get PinnedMediaTracker instance for the active media server"""
     from core.pinned_media import PinnedMediaTracker
-    tracker_file = DATA_DIR / "pinned_media.json"
-    return PinnedMediaTracker(str(tracker_file))
+    return PinnedMediaTracker(str(get_pinned_tracker_file()))
+
+
+def get_pinned_tracker_file():
+    """Pinned media file for the active backend (Plex and Jellyfin keep separate pins)"""
+    from core.pinned_media import pinned_media_filename
+    from web.services import get_settings_service
+    return DATA_DIR / pinned_media_filename(get_settings_service().get_media_server())
 
 
 def get_priority_manager():

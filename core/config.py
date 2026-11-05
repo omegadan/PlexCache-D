@@ -1119,8 +1119,9 @@ class ConfigManager:
         return self.get_data_folder() / "ondeck_tracker.json"
 
     def get_pinned_media_file(self) -> Path:
-        """Get the path for the pinned media tracker file."""
-        return self.get_data_folder() / "pinned_media.json"
+        """Get the path for the pinned media tracker file (per backend)."""
+        from core.pinned_media import pinned_media_filename
+        return self.get_data_folder() / pinned_media_filename(getattr(self, "media_server", "plex"))
 
     def get_user_tokens_file(self) -> Path:
         """Get the path for the user tokens cache file."""

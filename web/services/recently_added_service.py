@@ -118,7 +118,8 @@ class RecentlyAddedService:
 
     def __init__(self):
         self.settings_file = SETTINGS_FILE
-        self.pinned_file = DATA_DIR / "pinned_media.json"
+        from web.dependencies import get_pinned_tracker_file
+        self.pinned_file = get_pinned_tracker_file()
         self.ondeck_file = DATA_DIR / "ondeck_tracker.json"
         self.watchlist_file = DATA_DIR / "watchlist_tracker.json"
         self.timestamps_file = DATA_DIR / "timestamps.json"

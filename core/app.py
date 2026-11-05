@@ -1416,15 +1416,6 @@ class PlexCacheApp:
             logging.debug("No pinned media configured")
             return
 
-        if self._is_jellyfin():
-            # Pins store Plex rating keys and are created from the Plex-only
-            # web UI; they cannot be resolved against a Jellyfin server.
-            logging.warning(
-                f"[PINNED] {len(pin_entries)} pinned item(s) ignored - pinned media "
-                f"is not supported with Jellyfin yet"
-            )
-            return
-
         preference = self.config_manager.plex.pinned_preferred_resolution or "highest"
         logging.debug(
             f"Resolving {len(pin_entries)} pinned item(s) "
@@ -1432,8 +1423,12 @@ class PlexCacheApp:
         )
 
         try:
+            # Jellyfin pins (their own tracker file) resolve through an adapter
+            # that answers the same calls as plexapi's PlexServer.
+            pin_server = (self.plex_manager.get_pin_server() if self._is_jellyfin()
+                          else self.plex_manager.plex)
             resolved, orphaned = resolve_pins_to_paths(
-                self.plex_manager.plex,
+                pin_server,
                 self.pinned_tracker,
                 preference=preference,
                 # The one caller that prunes. Read-only render paths pass the
@@ -1451,7 +1446,7 @@ class PlexCacheApp:
         if orphaned:
             logging.info(
                 f"[PINNED] Removed {len(orphaned)} orphaned pin(s) "
-                f"(items no longer in Plex)"
+                f"(items no longer on the media server)"
             )
 
         if not resolved:

@@ -244,7 +244,7 @@ class TestOrphanCleanup:
         # Pin should be removed from the tracker
         assert tracker.get_pin("999") is None
         # Warning logged
-        assert any("no longer in Plex" in r.message for r in caplog.records)
+        assert any("no longer on the media server" in r.message for r in caplog.records)
 
     def test_existing_pins_survive_orphan_cleanup(self, tracker):
         movie = FakeMovie("Alive", [FakeMedia("1080", "/plex/Alive.mkv")])

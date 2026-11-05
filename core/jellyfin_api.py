@@ -373,6 +373,12 @@ class JellyfinManager:
     def mark_watchlist_incomplete(self) -> None:
         self._watchlist_data_complete = False
 
+    def get_pin_server(self):
+        """plexapi-shaped server for pinned media lookups (shares this session)."""
+        from core.jellyfin_pins import JellyfinPinServer
+        return JellyfinPinServer(self.url, self.api_key, session=self.http,
+                                 timeout=self.timeout or 30)
+
     def is_plex_tv_reachable(self) -> bool:
         return True
 

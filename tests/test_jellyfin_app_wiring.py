@@ -45,11 +45,29 @@ def test_jellyfin_session_path_used_directly():
     assert app._get_media_path_from_session(session) == "/media/tv/e1.mkv"
 
 
-def test_pins_skipped_in_jellyfin_mode():
+def test_pins_resolve_through_jellyfin_adapter(monkeypatch):
     app = make_app("jellyfin")
     app.pinned_tracker = MagicMock()
-    app.pinned_tracker.list_pins.return_value = [{"rating_key": "123"}]
+    app.pinned_tracker.list_pins.return_value = [{"rating_key": "abc", "type": "movie", "title": "Film"}]
+    app.plex_manager = MagicMock()
+    pin_server = object()
+    app.plex_manager.get_pin_server.return_value = pin_server
+    app.config_manager.plex = SimpleNamespace(pinned_preferred_resolution="highest")
+    app.config_manager.cache = SimpleNamespace(cache_associated_files="none")
+    app.file_path_modifier = MagicMock()
+    app.file_path_modifier.modify_file_paths.side_effect = lambda paths: [p.replace("/data/", "/mnt/user/") for p in paths]
+    app.file_path_modifier.convert_real_to_cache.return_value = ("/mnt/cache/movies/Film.mkv", None)
+    app.source_map, app.sibling_map, app.priority_manager = {}, {}, None
+
+    seen = {}
+    def fake_resolve(server, tracker, preference, prune):
+        seen["server"] = server
+        return [("/data/movies/Film.mkv", "abc", "movie")], []
+    monkeypatch.setattr("core.app.resolve_pins_to_paths", fake_resolve)
+
     modified = {}
     app._process_pinned_media(modified)
-    assert modified == {}
-    assert app.pinned_items == set()
+    assert seen["server"] is pin_server
+    assert list(modified) == ["/mnt/user/movies/Film.mkv"]
+    assert app.source_map["/mnt/user/movies/Film.mkv"] == "pinned"
+    assert app.pinned_rating_keys == {"abc"}
