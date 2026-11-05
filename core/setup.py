@@ -1,7 +1,10 @@
-import json, os, requests, uuid, time, webbrowser
+import json, os, sys, requests, uuid, time, webbrowser
 from urllib.parse import urlparse
 from plexapi.server import PlexServer
 from plexapi.exceptions import BadRequest
+from core.jellyfin_api import (
+    list_jellyfin_libraries, list_jellyfin_users, test_jellyfin_connection,
+)
 
 # Script folder and settings file
 # If we're in core/, go up one level to project root
@@ -135,7 +138,8 @@ def is_unraid():
 
 # ---------------- Multi-Path Mapping Functions ----------------
 
-def prompt_library_path_mapping(library_name: str, plex_locations: list, cache_root: str = None) -> list:
+def prompt_library_path_mapping(library_name: str, plex_locations: list, cache_root: str = None,
+                                 server_label: str = "Plex") -> list:
     """Prompt user to configure path mappings for a library's locations.
 
     Args:
@@ -149,7 +153,7 @@ def prompt_library_path_mapping(library_name: str, plex_locations: list, cache_r
     mappings = []
 
     if len(plex_locations) > 1:
-        print(f"\n  Plex locations for this library:")
+        print(f"\n  {server_label} locations for this library:")
         for loc in plex_locations:
             print(f"    - {loc}")
 
@@ -622,6 +626,235 @@ def _setup_plex_connection():
     return plex
 
 
+# ---------------- Media Server Choice / Jellyfin ----------------
+
+def _is_jellyfin() -> bool:
+    return str(settings_data.get('media_server', 'plex')).lower() == 'jellyfin'
+
+
+def _choose_media_server():
+    """Pick Plex or Jellyfin. Existing configs keep their server."""
+    global settings_data
+    if settings_data.get('media_server') in ('plex', 'jellyfin'):
+        return
+    if 'PLEX_URL' in settings_data or 'PLEX_TOKEN' in settings_data:
+        settings_data['media_server'] = 'plex'
+        return
+
+    print("\nWhich media server do you use?")
+    print("  [1] Plex")
+    print("  [2] Jellyfin")
+    while True:
+        choice = input("\nSelect option [1/2]: ").strip() or '1'
+        if choice in ('1', 'plex'):
+            settings_data['media_server'] = 'plex'
+            return
+        if choice in ('2', 'jellyfin'):
+            settings_data['media_server'] = 'jellyfin'
+            print("\nNote: Jellyfin has no Watchlist, so only Continue Watching")
+            print("and Next Up are cached.")
+            return
+        print("Please enter 1 or 2")
+
+
+def _prompt_jellyfin_api_key() -> str:
+    print("\nCreate an API key in Jellyfin:")
+    print("  Dashboard → Advanced → API Keys → + (name it PlexCache-D)")
+    return input('\nJellyfin API key: ').strip()
+
+
+def _setup_jellyfin_connection():
+    """Step 1 (Jellyfin): server URL + API key.
+
+    Returns:
+        (url, api_key) when newly connected, None if already configured.
+    """
+    global settings_data
+
+    print_step_header(1, TOTAL_SETUP_STEPS, "JELLYFIN CONNECTION")
+
+    if settings_data.get('JELLYFIN_URL') and settings_data.get('JELLYFIN_API_KEY'):
+        print(f"\n✓ Jellyfin URL: {settings_data['JELLYFIN_URL']} (already configured)")
+        return None
+
+    while True:
+        url = input('\nJellyfin server address [http://localhost:8096]: ').strip() or 'http://localhost:8096'
+        url = url.rstrip('/')
+        api_key = _prompt_jellyfin_api_key()
+        ok, error, info = test_jellyfin_connection(url, api_key)
+        if ok:
+            print(f"\n✓ Connected to: {info.get('ServerName', 'Jellyfin')} "
+                  f"(version {info.get('Version', '?')})")
+            settings_data['JELLYFIN_URL'] = url
+            settings_data['JELLYFIN_API_KEY'] = api_key
+            return url, api_key
+        print(f"✗ {error}")
+
+
+def _setup_jellyfin_libraries(conn):
+    """Step 2 (Jellyfin): library selection and path mappings."""
+    global settings_data
+
+    print_step_header(2, TOTAL_SETUP_STEPS, "LIBRARY SELECTION")
+
+    url, api_key = conn
+    try:
+        libraries = list_jellyfin_libraries(url, api_key)
+    except requests.RequestException as e:
+        print(f"✗ Could not fetch libraries from Jellyfin: {e}")
+        return
+    if not libraries:
+        print("✗ No video libraries found on this Jellyfin server.")
+        return
+
+    print("\nWhere is your cache drive located?")
+    print("(All cacheable libraries will use subdirectories here)")
+    cache_root = input("Cache drive path [/mnt/cache]: ").strip() or '/mnt/cache'
+    if not cache_root.endswith('/'):
+        cache_root = cache_root + '/'
+    print(f"\n✓ Cache root: {cache_root}")
+    print("\nNow select which libraries to include and configure their paths.")
+    print("For each library, you'll specify where files are actually stored.\n")
+
+    selected = []
+    path_mappings = []
+    while not selected:
+        for library in libraries:
+            locs = library['locations']
+            print("-" * 60)
+            print(f"Library: {library['title']} ({library['type_label']})")
+            if locs:
+                print(f"  Jellyfin path: {locs[0]}" + (f" (+{len(locs)-1} more)" if len(locs) > 1 else ""))
+            while True:
+                include = (input("Include? [Y/n] ") or 'yes').lower()
+                if include in ('y', 'yes', 'n', 'no'):
+                    break
+                print("Please enter yes or no")
+            if include in ('n', 'no'):
+                print("  → Skipped\n")
+                continue
+            selected.append(library['title'])
+            if locs:
+                path_mappings.extend(prompt_library_path_mapping(
+                    library['title'], locs, cache_root, server_label="Jellyfin"))
+            print()
+        if not selected:
+            print("\n⚠ You must select at least one library. Please try again.\n")
+
+    settings_data['jellyfin_libraries'] = selected
+    settings_data['path_mappings'] = path_mappings
+    settings_data['cache_dir'] = cache_root
+
+    print("-" * 60)
+    print(f"✓ Configured {len(path_mappings)} library path(s)")
+    for m in path_mappings:
+        status = "cacheable" if m.get('cacheable', True) else "non-cacheable"
+        print(f"  • {m['name']}: {status}")
+
+
+def _setup_jellyfin_users(conn):
+    """Step 4 (Jellyfin): main user and which other users to track."""
+    global settings_data
+
+    print_step_header(4, TOTAL_SETUP_STEPS, "USER CONFIGURATION")
+
+    settings_data['remote_watchlist_toggle'] = False
+    url, api_key = conn
+    try:
+        users = list_jellyfin_users(url, api_key)
+    except requests.RequestException as e:
+        print(f"✗ Could not fetch users from Jellyfin: {e}")
+        return
+    if not users:
+        print("✗ No enabled users found on this Jellyfin server.")
+        return
+
+    # Main user: always monitored (like the Plex server owner)
+    print("\nJellyfin users:")
+    for i, u in enumerate(users, 1):
+        print(f"  [{i}] {u['title']}" + (" (administrator)" if u['is_admin'] else ""))
+    main = None
+    while main is None:
+        choice = input(f"\nMain user - always monitored, usually you [1]: ").strip() or '1'
+        if choice.isdigit() and 1 <= int(choice) <= len(users):
+            main = users[int(choice) - 1]
+        else:
+            match = [u for u in users if u['title'].lower() == choice.lower()]
+            if match:
+                main = match[0]
+            else:
+                print(f"Enter a number from 1 to {len(users)}")
+    settings_data['jellyfin_user'] = main['title']
+    print(f"✓ Main user: {main['title']}")
+
+    others = [u for u in users if u is not main]
+    tracked = set()
+    settings_data['users_toggle'] = False
+    if others:
+        while True:
+            answer = (input('\nAlso cache Continue Watching / Next Up for other users? [Y/n] ') or 'yes').lower()
+            if answer in ('y', 'yes', 'n', 'no'):
+                break
+            print("Please enter yes or no")
+        if answer in ('y', 'yes'):
+            settings_data['users_toggle'] = True
+            for u in others:
+                track = (input(f"  Track {u['title']}? [Y/n] ") or 'yes').lower()
+                if track not in ('n', 'no'):
+                    tracked.add(u['title'])
+
+    # Save every other user so the first run doesn't auto-add them as new.
+    settings_data['jellyfin_users'] = [{
+        "title": u['title'],
+        "id": u['id'],
+        "is_admin": u['is_admin'],
+        "skip_ondeck": u['title'] not in tracked,
+        "skip_watchlist": True,
+    } for u in others]
+    print(f"✓ Tracking {len(tracked)} other user(s)")
+
+
+def refresh_jellyfin_users(settings: dict) -> dict:
+    """Refresh jellyfin_users from the server, keeping tracking choices.
+
+    Users new to the server are added untracked (skip_ondeck True), the same
+    as a normal run does when it discovers them.
+    """
+    url = settings.get('JELLYFIN_URL')
+    api_key = settings.get('JELLYFIN_API_KEY')
+    if not url or not api_key:
+        print("Error: JELLYFIN_URL or JELLYFIN_API_KEY not found in settings.")
+        return settings
+    try:
+        users = list_jellyfin_users(url, api_key)
+    except requests.RequestException as e:
+        print(f"Error connecting to Jellyfin: {e}")
+        return settings
+
+    main = (settings.get('jellyfin_user') or '').lower()
+    existing = {u.get('title', '').lower(): u for u in settings.get('jellyfin_users', [])}
+    print("\nRefreshing user list from Jellyfin...")
+    print("-" * 60)
+    refreshed = []
+    for u in users:
+        if u['title'].lower() == main:
+            continue
+        old = existing.get(u['title'].lower())
+        skip = old.get('skip_ondeck', True) if old else True
+        refreshed.append({
+            "title": u['title'], "id": u['id'], "is_admin": u['is_admin'],
+            "skip_ondeck": skip, "skip_watchlist": True,
+        })
+        note = "" if old else " (new)"
+        print(f"  {u['title']}: {'not tracked' if skip else 'tracked'}{note}")
+    for name in existing:
+        if name not in {u['title'].lower() for u in refreshed}:
+            print(f"  {existing[name].get('title')}: REMOVED (no longer on server)")
+    settings['jellyfin_users'] = refreshed
+    print("-" * 60)
+    return settings
+
+
 def _setup_library_paths(plex):
     """Step 2: Configure library selection and path mappings.
 
@@ -713,8 +946,11 @@ def _setup_caching_behavior():
     if 'days_to_monitor' not in settings_data:
         prompt_user_for_number('Max age of OnDeck items in days [99]: ', '99', 'days_to_monitor')
 
-    # Watchlist Settings
-    if 'watchlist_toggle' not in settings_data:
+    # Watchlist Settings (Jellyfin has no watchlist)
+    if _is_jellyfin():
+        settings_data['watchlist_toggle'] = False
+        settings_data['watchlist_episodes'] = 0
+    elif 'watchlist_toggle' not in settings_data:
         print("\n--- Watchlist Settings ---")
         watchlist = input('Fetch your own watchlist media? [Y/n] ') or 'yes'
         if watchlist.lower() in ['n', 'no']:
@@ -894,7 +1130,9 @@ def _setup_advanced_settings():
         prompt_user_for_duration('Cache retention in hours [12]: ', '12', 'cache_retention_hours')
 
     # Watchlist Retention
-    if 'watchlist_retention_days' not in settings_data:
+    if _is_jellyfin():
+        settings_data.setdefault('watchlist_retention_days', 0)
+    elif 'watchlist_retention_days' not in settings_data:
         print('\nWatchlist retention: Auto-expire watchlist items after X days.')
         print('(0 = keep forever while on watchlist)')
         prompt_user_for_duration_days('Watchlist retention in days [0]: ', '0', 'watchlist_retention_days')
@@ -1376,10 +1614,17 @@ def _setup_summary():
     # Configuration summary
     lib_count = len(settings_data.get('path_mappings', []))
     cacheable_count = sum(1 for m in settings_data.get('path_mappings', []) if m.get('cacheable', True))
-    user_count = len(settings_data.get('users', []))
+    if _is_jellyfin():
+        # Count tracked users only; untracked ones are saved too
+        user_count = 0
+        if settings_data.get('users_toggle'):
+            user_count = sum(1 for u in settings_data.get('jellyfin_users', []) if not u.get('skip_ondeck'))
+    else:
+        user_count = len(settings_data.get('users', []))
     cache_limit = settings_data.get('cache_limit', '')
 
     print(f"\n  Libraries: {lib_count} configured ({cacheable_count} cacheable)")
+    print(f"  Media server: {'Jellyfin' if _is_jellyfin() else 'Plex'}")
     print(f"  Users: {user_count + 1} (you + {user_count} others)")
     print(f"  Cache limit: {cache_limit if cache_limit else 'No limit'}")
     print(f"  Eviction: {settings_data.get('cache_eviction_mode', 'none')}")
@@ -1390,16 +1635,16 @@ def _setup_summary():
     print("\n" + "-" * 60)
     run_test = input("Run a test (dry-run) now to verify configuration? [Y/n] ") or 'yes'
     if run_test.lower() in ['y', 'yes']:
-        print("\nRunning: python3 plexcache_app.py --dry-run --verbose\n")
+        print("\nRunning: python3 plexcache.py --dry-run --verbose\n")
         import subprocess
         try:
-            subprocess.run(['python3', 'plexcache_app.py', '--dry-run', '--verbose'], cwd=script_folder)
+            subprocess.run([sys.executable, 'plexcache.py', '--dry-run', '--verbose'], cwd=script_folder)
         except Exception as e:
             print(f"Could not run test: {e}")
-            print("You can run manually: python3 plexcache_app.py --dry-run --verbose")
+            print("You can run manually: python3 plexcache.py --dry-run --verbose")
     else:
-        print("\nYou can run PlexCache with: python3 plexcache_app.py")
-        print("Or test first with: python3 plexcache_app.py --dry-run --verbose")
+        print("\nYou can run PlexCache with: python3 plexcache.py")
+        print("Or test first with: python3 plexcache.py --dry-run --verbose")
 
     print()
 
@@ -1413,6 +1658,19 @@ def setup(advanced_mode: bool = False):
     """
     global settings_data
     settings_data['firststart'] = False
+
+    _choose_media_server()
+
+    if _is_jellyfin():
+        conn = _setup_jellyfin_connection()
+        if conn:
+            _setup_jellyfin_libraries(conn)
+        _setup_caching_behavior()
+        if conn:
+            _setup_jellyfin_users(conn)
+        _setup_advanced_settings()
+        _setup_summary()
+        return
 
     # Step 1: Plex Connection
     plex = _setup_plex_connection()
@@ -1555,6 +1813,33 @@ def refresh_users(settings: dict) -> dict:
     return settings
 
 
+def _manage_existing_jellyfin():
+    """Existing Jellyfin config: offer a new API key and a user refresh."""
+    global settings_data
+
+    change_key = input("\nWould you like to change the Jellyfin API key? [y/N] ") or 'no'
+    if change_key.lower() in ['y', 'yes']:
+        api_key = _prompt_jellyfin_api_key()
+        ok, error, info = test_jellyfin_connection(settings_data.get('JELLYFIN_URL', ''), api_key)
+        if ok:
+            settings_data['JELLYFIN_API_KEY'] = api_key
+            write_settings(settings_filename, settings_data)
+            print(f"Connected to {info.get('ServerName', 'Jellyfin')}. New API key saved!")
+        else:
+            print(f"Error: {error}")
+            print("Keeping existing API key.")
+
+    users = settings_data.get('jellyfin_users', [])
+    tracked = sum(1 for u in users if not u.get('skip_ondeck'))
+    print(f"\nCurrent user list: {len(users)} other users ({tracked} tracked)")
+    refresh = input("Would you like to refresh the user list from Jellyfin? [y/N] ") or 'no'
+    if refresh.lower() in ['y', 'yes']:
+        settings_data = refresh_jellyfin_users(settings_data)
+        write_settings(settings_filename, settings_data)
+        print("\nUser list refreshed and saved!")
+    print("(Choose which users are tracked in the web UI: Settings > Jellyfin)")
+
+
 def run_setup():
     """Entry point for setup wizard. Can be called from unified plexcache.py entry point."""
     global settings_data
@@ -1582,8 +1867,12 @@ def run_setup():
                 else:
                     print("Configuration exists and appears to be valid.")
 
+                jellyfin = _is_jellyfin()
+                if jellyfin:
+                    _manage_existing_jellyfin()
+
                 # Offer to re-authenticate (useful for switching from auto-detected to OAuth token)
-                reauth = input("\nWould you like to re-authenticate with Plex? [y/N] ") or 'no'
+                reauth = 'no' if jellyfin else (input("\nWould you like to re-authenticate with Plex? [y/N] ") or 'no')
                 if reauth.lower() in ['y', 'yes']:
                     print("\nRe-authenticating will replace your current Plex token.")
                     new_token = None
@@ -1638,7 +1927,7 @@ def run_setup():
                         print("No valid token provided. Keeping existing token.")
 
                 # Always offer to refresh users (fixes is_local detection for existing configs)
-                if settings_data.get('users_toggle') and settings_data.get('users'):
+                if not jellyfin and settings_data.get('users_toggle') and settings_data.get('users'):
                     user_count = len(settings_data.get('users', []))
                     home_count = sum(1 for u in settings_data.get('users', []) if u.get('is_local'))
                     print(f"\nCurrent user list: {user_count} users ({home_count} marked as home/local)")

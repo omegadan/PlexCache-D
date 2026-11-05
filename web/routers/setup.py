@@ -80,35 +80,14 @@ def _clear_server_caches() -> None:
 
 def _validate_jellyfin_url(url: str) -> Optional[str]:
     """Return an error message for an unusable Jellyfin URL, else None."""
-    from urllib.parse import urlparse
-    try:
-        parsed = urlparse(url)
-    except ValueError:
-        return "Invalid URL"
-    if parsed.scheme not in ("http", "https") or not parsed.hostname:
-        return "URL must start with http:// or https:// and include a host"
-    return None
+    from core.jellyfin_api import validate_jellyfin_url
+    return validate_jellyfin_url(url)
 
 
 def _test_jellyfin(url: str, api_key: str) -> tuple:
     """(ok, error, server_info) for a Jellyfin URL + API key."""
-    error = _validate_jellyfin_url(url)
-    if error:
-        return False, error, {}
-    if not api_key:
-        return False, "API key is required", {}
-    try:
-        resp = requests.get(
-            f"{url.rstrip('/')}/System/Info",
-            headers={"X-Emby-Token": api_key, "Accept": "application/json"},
-            timeout=10,
-        )
-        if resp.status_code in (401, 403):
-            return False, "Jellyfin rejected the API key", {}
-        resp.raise_for_status()
-        return True, "", resp.json()
-    except (requests.RequestException, ValueError) as e:
-        return False, f"Could not connect to Jellyfin: {e}", {}
+    from core.jellyfin_api import test_jellyfin_connection
+    return test_jellyfin_connection(url, api_key)
 
 
 def get_or_create_client_id(settings: Dict) -> str:

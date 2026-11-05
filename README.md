@@ -131,8 +131,8 @@ python3 plexcache.py --web --port 8080     # Custom port
 ## Jellyfin Support (fork)
 
 PlexCache-D can use a Jellyfin server instead of Plex for the caching run. Choose
-**Jellyfin** in step 2 of the Web UI setup wizard, which then lists your Jellyfin
-libraries and users. You can also pick the backend with `media_server`
+**Jellyfin** in step 2 of the Web UI setup wizard (or at the first prompt of
+`python3 plexcache.py --setup`), which then lists your Jellyfin libraries and users. You can also pick the backend with `media_server`
 (`"plex"` by default, or `"jellyfin"`) in **Settings → Jellyfin** or in
 `plexcache_settings.json`:
 
@@ -168,7 +168,7 @@ Set each path mapping's **Plex path** (`plex_path`) to the path *Jellyfin* repor
 
 Web UI login with Jellyfin uses a username and password (set in the wizard's Security step); the Plex sign-in button is hidden.
 
-Not supported with Jellyfin yet: Watchlist (Jellyfin has no watchlist, so the watchlist toggles are ignored), pinned media, recently-added, duplicate detection, and the CLI setup wizard (`--setup`).
+Not supported with Jellyfin yet: Watchlist (Jellyfin has no watchlist, so the watchlist toggles are ignored), pinned media, recently-added, and duplicate detection.
 
 ## Docker Installation (Recommended for Unraid)
 

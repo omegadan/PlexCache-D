@@ -289,15 +289,6 @@ class SettingsService:
 
     # Jellyfin library CollectionType -> label shown in the wizard. Types not
     # listed (music, books, photos, playlists, boxsets, livetv) are not offered.
-    _JELLYFIN_LIBRARY_LABELS = {
-        "movies": "Movies",
-        "tvshows": "TV Shows",
-        "homevideos": "Home Videos",
-        "musicvideos": "Music Videos",
-        "mixed": "Mixed",
-        "": "Mixed",
-    }
-
     def get_jellyfin_libraries(self, url: str, api_key: str) -> List[Dict[str, Any]]:
         """Video libraries on a Jellyfin server, in the wizard's library shape.
 
@@ -305,47 +296,13 @@ class SettingsService:
         so the same step-3 template and path-mapping generation apply. Raises
         ``requests.RequestException`` on connection failure.
         """
-        import requests
-        resp = requests.get(
-            f"{url.rstrip('/')}/Library/VirtualFolders",
-            headers={"X-Emby-Token": api_key, "Accept": "application/json"},
-            timeout=10,
-        )
-        resp.raise_for_status()
-        libraries = []
-        for folder in resp.json() or []:
-            ctype = (folder.get("CollectionType") or "").lower()
-            if ctype not in self._JELLYFIN_LIBRARY_LABELS:
-                continue
-            libraries.append({
-                "id": folder.get("ItemId") or folder.get("Name"),
-                "title": folder.get("Name", "Unknown"),
-                "type_label": self._JELLYFIN_LIBRARY_LABELS[ctype],
-                "locations": list(folder.get("Locations") or []),
-            })
-        return libraries
+        from core.jellyfin_api import list_jellyfin_libraries
+        return list_jellyfin_libraries(url, api_key)
 
     def get_jellyfin_users(self, url: str, api_key: str) -> List[Dict[str, Any]]:
         """Enabled Jellyfin users as [{title, id, is_admin}], admins first."""
-        import requests
-        resp = requests.get(
-            f"{url.rstrip('/')}/Users",
-            headers={"X-Emby-Token": api_key, "Accept": "application/json"},
-            timeout=10,
-        )
-        resp.raise_for_status()
-        users = []
-        for u in resp.json() or []:
-            policy = u.get("Policy") or {}
-            if policy.get("IsDisabled") or not u.get("Name"):
-                continue
-            users.append({
-                "title": u["Name"],
-                "id": u.get("Id"),
-                "is_admin": bool(policy.get("IsAdministrator")),
-            })
-        users.sort(key=lambda u: (not u["is_admin"], u["title"].lower()))
-        return users
+        from core.jellyfin_api import list_jellyfin_users
+        return list_jellyfin_users(url, api_key)
 
     def get_path_mappings(self) -> List[Dict[str, Any]]:
         """Get path mappings"""

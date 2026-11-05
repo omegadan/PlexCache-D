@@ -48,6 +48,104 @@ TICKS_PER_MS = 10_000
 # Box sets and playlists only re-list items from real libraries.
 NON_VIDEO_COLLECTION_TYPES = {"music", "books", "photos", "playlists", "boxsets", "livetv", "folders"}
 
+# Video library types offered by the setup wizards, with display labels.
+VIDEO_LIBRARY_LABELS = {
+    "movies": "Movies",
+    "tvshows": "TV Shows",
+    "homevideos": "Home Videos",
+    "musicvideos": "Music Videos",
+    "mixed": "Mixed",
+    "": "Mixed",
+}
+
+
+# ----------------------------------------------------------------------
+# Setup helpers (used by the web and CLI setup wizards)
+# ----------------------------------------------------------------------
+def _setup_get(url: str, api_key: str, path: str) -> Any:
+    resp = requests.get(
+        f"{url.rstrip('/')}{path}",
+        headers={"X-Emby-Token": api_key, "Accept": "application/json"},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def validate_jellyfin_url(url: str) -> Optional[str]:
+    """Return an error message for an unusable Jellyfin URL, else None."""
+    from urllib.parse import urlparse
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return "Invalid URL"
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        return "URL must start with http:// or https:// and include a host"
+    return None
+
+
+def test_jellyfin_connection(url: str, api_key: str) -> tuple:
+    """(ok, error, server_info) for a Jellyfin URL + API key."""
+    error = validate_jellyfin_url(url)
+    if error:
+        return False, error, {}
+    if not api_key:
+        return False, "API key is required", {}
+    try:
+        resp = requests.get(
+            f"{url.rstrip('/')}/System/Info",
+            headers={"X-Emby-Token": api_key, "Accept": "application/json"},
+            timeout=10,
+        )
+        if resp.status_code in (401, 403):
+            return False, "Jellyfin rejected the API key", {}
+        resp.raise_for_status()
+        return True, "", resp.json()
+    except (requests.RequestException, ValueError) as e:
+        return False, f"Could not connect to Jellyfin: {e}", {}
+
+
+# Not a pytest test despite the name.
+test_jellyfin_connection.__test__ = False
+
+
+def list_jellyfin_libraries(url: str, api_key: str) -> List[Dict[str, Any]]:
+    """Video libraries as [{id, title, type_label, locations}].
+
+    Raises ``requests.RequestException`` on connection failure.
+    """
+    libraries = []
+    for folder in _setup_get(url, api_key, "/Library/VirtualFolders") or []:
+        ctype = (folder.get("CollectionType") or "").lower()
+        if ctype not in VIDEO_LIBRARY_LABELS:
+            continue
+        libraries.append({
+            "id": folder.get("ItemId") or folder.get("Name"),
+            "title": folder.get("Name", "Unknown"),
+            "type_label": VIDEO_LIBRARY_LABELS[ctype],
+            "locations": list(folder.get("Locations") or []),
+        })
+    return libraries
+
+
+def list_jellyfin_users(url: str, api_key: str) -> List[Dict[str, Any]]:
+    """Enabled users as [{title, id, is_admin}], admins first.
+
+    Raises ``requests.RequestException`` on connection failure.
+    """
+    users = []
+    for u in _setup_get(url, api_key, "/Users") or []:
+        policy = u.get("Policy") or {}
+        if policy.get("IsDisabled") or not u.get("Name"):
+            continue
+        users.append({
+            "title": u["Name"],
+            "id": u.get("Id"),
+            "is_admin": bool(policy.get("IsAdministrator")),
+        })
+    users.sort(key=lambda u: (not u["is_admin"], u["title"].lower()))
+    return users
+
 
 @dataclass
 class JellyfinSession:
