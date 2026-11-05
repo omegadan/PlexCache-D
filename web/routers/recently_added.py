@@ -107,11 +107,21 @@ def recently_added_list(
             # Libraries Plex refused to list. Their rows are missing from the
             # table, the counts and the filter above, so the page has to say so.
             "unreadable_libraries": result.get("unreadable_libraries") or [],
+            "server_label": _server_label(),
             # The fetch caps at max_items (newest first); if we hit it, older
             # media is hidden — surface that rather than silently truncating.
             "capped": result["summary"].get("total", 0) >= max_items,
         },
     )
+
+
+def _server_label() -> str:
+    """"Plex" or "Jellyfin", for messages about the media server."""
+    try:
+        from web.services import get_settings_service
+        return "Jellyfin" if get_settings_service().get_media_server() == "jellyfin" else "Plex"
+    except Exception:
+        return "Plex"
 
 
 @router.get("/widget", response_class=HTMLResponse)

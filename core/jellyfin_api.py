@@ -30,7 +30,10 @@ from typing import Any, Dict, List, Optional, Sequence
 
 import requests
 
-from core.plex_api import OnDeckItem, select_next_episodes
+from core.plex_api import (
+    OnDeckItem, RecentlyAddedItem, RecentlyAddedResult, _media_version_label,
+    select_next_episodes,
+)
 
 CLIENT_NAME = "PlexCache-D"
 DEVICE_NAME = "PlexCache-D"
@@ -515,6 +518,97 @@ class JellyfinManager:
         for name in sorted(by_user):
             logging.debug(f"[USER:{name}] Found {by_user[name]} OnDeck items")
         return results
+
+    # ------------------------------------------------------------------
+    # Recently added
+    # ------------------------------------------------------------------
+    def get_recently_added_media(self, valid_sections: List[Any], days_to_monitor: int,
+                                 max_items: int = 100,
+                                 version_preference: str = "highest") -> RecentlyAddedResult:
+        """Recently-added movies and episodes, same shape as PlexManager's.
+
+        Uses the main user's libraries (filtered by ``jellyfin_libraries``);
+        ``valid_sections`` is accepted for signature parity and ignored. One
+        item per Jellyfin item; alternate versions go in ``version_files``.
+
+        Raises if the library list itself can't be read (nothing to report).
+        """
+        from core.jellyfin_pins import JellyfinPinItem
+        from core.pinned_media import select_media_version
+
+        if not self._main_user:
+            raise ConnectionError("Jellyfin main user not loaded; call connect() first")
+        user_id = self._main_user["Id"]
+        libraries = self._user_libraries(user_id)
+
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days_to_monitor)
+        items: List[RecentlyAddedItem] = []
+        unreadable: List[str] = []
+        params = {
+            "Recursive": "true", "IncludeItemTypes": "Movie,Episode",
+            "SortBy": "DateCreated", "SortOrder": "Descending", "Limit": max_items,
+            "Fields": "MediaSources,Path,DateCreated",
+        }
+        for lib in libraries:
+            lib_name = lib.get("Name") or lib.get("Id") or "?"
+            try:
+                data = self._get_first([
+                    ("/Items", {**params, "userId": user_id, "ParentId": lib.get("Id")}),
+                    (f"/Users/{user_id}/Items", {**params, "ParentId": lib.get("Id")}),
+                ]) or {}
+            except requests.RequestException as e:
+                logging.warning(f"Recently added: could not read Jellyfin library '{lib_name}': {e}")
+                unreadable.append(lib_name)
+                continue
+
+            kept = 0
+            for data_item in data.get("Items") or []:
+                added = _parse_jellyfin_date(data_item.get("DateCreated"))
+                if added is not None and added < cutoff:
+                    continue
+                item = JellyfinPinItem(None, data_item)
+                if item.type not in ("movie", "episode") or not item.media:
+                    continue
+                try:
+                    preferred = select_media_version(item, version_preference)
+                except ValueError:
+                    continue
+                version_files = [{
+                    "file_path": part.file,
+                    "size": int(part.size or 0),
+                    "is_preferred": media is preferred,
+                    "label": _media_version_label(media),
+                } for media in item.media for part in media.parts]
+                preferred_files = [f for f in version_files if f["is_preferred"]]
+                episode_info = None
+                if item.type == "episode":
+                    episode_info = {"show": item.grandparentTitle, "season": item.parentIndex,
+                                    "episode": item.index}
+                items.append(RecentlyAddedItem(
+                    file_path=preferred_files[0]["file_path"],
+                    rating_key=item.ratingKey,
+                    title=item.title,
+                    media_type=item.type,
+                    # Naive local time, like plexapi's addedAt
+                    added_at=added.astimezone().replace(tzinfo=None) if added else None,
+                    library_title=lib.get("Name", ""),
+                    library_section_id=lib.get("Id"),
+                    size=sum(f["size"] for f in preferred_files),
+                    episode_info=episode_info,
+                    show_rating_key=getattr(item, "grandparentRatingKey", "") or "",
+                    version_files=version_files,
+                ))
+                kept += 1
+            logging.debug(f"Recently added [{lib_name}]: {kept} item(s) within {days_to_monitor}d")
+
+        items.sort(key=lambda i: i.added_at or datetime.min, reverse=True)
+        items = items[:max_items]
+        logging.info(
+            f"Recently added: returning {len(items)} item(s) from "
+            f"{len(libraries) - len(unreadable)} Jellyfin library(ies) within {days_to_monitor}d"
+            + (f"; {len(unreadable)} unreadable ({', '.join(unreadable)})" if unreadable else "")
+        )
+        return RecentlyAddedResult(items=items, unreadable_libraries=unreadable)
 
     def _fetch_user_on_deck_media(self, username: str, days_to_monitor: int,
                                   number_episodes: int,

@@ -147,12 +147,17 @@ class RecentlyAddedService:
             logger.warning(f"RecentlyAddedService: settings not loadable: {e}")
             return self._empty_result("PlexCache is not configured yet.")
 
-        if not config.plex.plex_url or not config.plex.plex_token:
-            return self._empty_result("Plex server is not configured.")
-
-        plex_manager = self._connect_plex(config)
+        server_label = "Jellyfin" if getattr(config, "is_jellyfin", False) is True else "Plex"
+        if server_label == "Jellyfin":
+            if not config.jellyfin.jellyfin_url or not config.jellyfin.jellyfin_api_key:
+                return self._empty_result("Jellyfin server is not configured.")
+            plex_manager = self._connect_jellyfin(config)
+        else:
+            if not config.plex.plex_url or not config.plex.plex_token:
+                return self._empty_result("Plex server is not configured.")
+            plex_manager = self._connect_plex(config)
         if plex_manager is None:
-            return self._empty_result("Could not connect to the Plex server.")
+            return self._empty_result(f"Could not connect to the {server_label} server.")
 
         valid_sections = config.plex.valid_sections or []
         # Same version preference the pin and caching paths use, so the row
@@ -631,6 +636,23 @@ class RecentlyAddedService:
             logger.warning(f"RecentlyAddedService: Plex connection failed: {e}")
             return None
 
+    def _connect_jellyfin(self, config):
+        """Build + connect a JellyfinManager from loaded config. None on failure."""
+        try:
+            from core.jellyfin_api import JellyfinManager
+            manager = JellyfinManager(
+                config.jellyfin.jellyfin_url,
+                config.jellyfin.jellyfin_api_key,
+                main_user=config.jellyfin.jellyfin_user,
+                libraries=config.jellyfin.jellyfin_libraries,
+                timeout=30,
+            )
+            manager.connect()
+            return manager
+        except Exception as e:
+            logger.warning(f"RecentlyAddedService: Jellyfin connection failed: {e}")
+            return None
+
     @staticmethod
     def _pin_path_map(plex_manager):
         """Resolved pins keyed on Plex path, or None if they can't be checked.
@@ -641,9 +663,13 @@ class RecentlyAddedService:
         """
         try:
             from web.services import get_pinned_service
-            return get_pinned_service().resolve_all_to_plex_path_map(
-                plex=getattr(plex_manager, "plex", None)
-            )
+            # Jellyfin pins resolve through the plexapi-shaped pin adapter
+            from core.jellyfin_api import JellyfinManager
+            if isinstance(plex_manager, JellyfinManager):
+                server = plex_manager.get_pin_server()
+            else:
+                server = getattr(plex_manager, "plex", None)
+            return get_pinned_service().resolve_all_to_plex_path_map(plex=server)
         except Exception as e:
             logger.warning(f"RecentlyAddedService: pin resolve failed: {e}")
             return None

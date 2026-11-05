@@ -170,7 +170,9 @@ Web UI login with Jellyfin uses a username and password (set in the wizard's Sec
 
 Pinned media works with Jellyfin: search and pin from **Settings → Cache**, or use `--pin <item id>`, `--pin-by-title` and `--list-pins`. Jellyfin pins are kept in `data/pinned_media_jellyfin.json`, separate from Plex pins, so switching servers never loses either set.
 
-Not supported with Jellyfin yet: Watchlist (Jellyfin has no watchlist, so the watchlist toggles are ignored), recently-added, and duplicate detection.
+The **Recently Added** page and dashboard card work with Jellyfin too, using the main user's libraries.
+
+Not supported with Jellyfin yet: Watchlist (Jellyfin has no watchlist, so the watchlist toggles are ignored) and duplicate detection.
 
 ## Docker Installation (Recommended for Unraid)
 

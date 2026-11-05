@@ -121,7 +121,7 @@
         {% if row.outcome == 'pin_unknown' %}
         {{ pin_button(row.rating_key, row.pin_type, row.title, False,
                       disabled=True,
-                      disabled_reason='Plex did not answer, so PlexCache cannot tell whether this is pinned. Refresh to retry.') }}
+                      disabled_reason=(server_label | default('Plex')) ~ ' did not answer, so PlexCache cannot tell whether this is pinned. Refresh to retry.') }}
         {% elif row.is_pinned and row.pin_scope in ('show', 'season') %}
         {{ pin_button(row.pin_holder_key, row.pin_scope, row.pin_holder_title, True,
                       label='Unpin ' ~ row.pin_scope,
@@ -175,7 +175,7 @@
     <i data-lucide="alert-triangle" style="flex-shrink: 0; margin-top: 2px;"></i>
     <div>
         <strong>Couldn't read {{ unreadable_libraries|length }} librar{{ 'ies' if unreadable_libraries|length != 1 else 'y' }}:</strong>
-        {{ unreadable_libraries|join(', ') }}. Plex didn't answer, so anything
+        {{ unreadable_libraries|join(', ') }}. {{ server_label | default('Plex') }} didn't answer, so anything
         added there is missing from the counts and the table below. Refresh to retry.
     </div>
 </div>
